@@ -83,6 +83,7 @@
 #include <stout/os/ls.hpp>
 #include <stout/os/mkdir.hpp>
 #include <stout/os/mktemp.hpp>
+#include <stout/os/mkdtemp.hpp>
 #include <stout/os/os.hpp>
 #include <stout/os/permissions.hpp>
 #include <stout/os/read.hpp>
