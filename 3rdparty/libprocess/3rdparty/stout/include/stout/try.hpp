@@ -24,6 +24,10 @@
 #include <stout/option.hpp>
 #include <stout/some.hpp>
 
+#ifdef __WINDOWS__
+#include <stout/windows/error.hpp>
+#endif // __WINDOWS__
+
 // This class can represent only one of these states at a time:
 //   1) A value of T.
 //   2) An error state, with a corresponding error string.
@@ -57,6 +61,11 @@ public:
 
   Try(const ErrnoError& error)
     : message(error.message) {}
+
+#ifdef __WINDOWS__
+  Try(const WindowsError& error)
+    : message(error.message) {}
+#endif // __WINDOWS__
 
   // TODO(bmahler): Add move constructor.
 

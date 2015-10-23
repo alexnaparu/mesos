@@ -139,6 +139,7 @@ nobase_include_HEADERS =		\
   stout/uuid.hpp			\
   stout/version.hpp			\
   stout/windows.hpp			\
+  stout/windows/error.hpp		\
   stout/windows/format.hpp		\
   stout/windows/gzip.hpp		\
   stout/windows/os.hpp
