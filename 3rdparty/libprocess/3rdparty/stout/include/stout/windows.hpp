@@ -90,6 +90,11 @@ typedef SSIZE_T ssize_t;
 // have to change any socket code.
 constexpr int SHUT_RD = SD_RECEIVE;
 
+// Macros that test whether a `stat` struct represents a directory or a file.
+#define S_ISDIR(mode) (((mode) & S_IFMT) == S_IFDIR)
+#define S_ISREG(mode) (((mode) & S_IFMT) == S_IFREG)
+#define S_ISCHR(mode) (((mode) & S_IFMT) == S_IFCHR)
+
 
 // Permissions API. (cf. MESOS-3176 to track ongoing permissions work.)
 //
