@@ -34,6 +34,7 @@ set(STOUT_TESTS_SRC
   multimap_tests.cpp
   none_tests.cpp
   option_tests.cpp
+  os/filesystem_tests.cpp
   protobuf_tests.pb.h
   protobuf_tests.proto
   result_tests.cpp
