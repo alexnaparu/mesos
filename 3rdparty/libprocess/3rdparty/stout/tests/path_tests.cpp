@@ -17,6 +17,12 @@
 
 #include <stout/path.hpp>
 
+#include <stout/os/exists.hpp>
+#include <stout/os/getcwd.hpp>
+#include <stout/os/open.hpp>
+#include <stout/os/rm.hpp>
+#include <stout/os/touch.hpp>
+
 #include <stout/tests/utils.hpp>
 
 using std::string;
