@@ -41,6 +41,41 @@
 //     that uses it (such as Mesos).
 
 
+// The Windows headers define a global macro, `GetMessage`, which conflicts
+// with our use of `google::protobufs::Reflection::GetMessage`. This block of
+// code un-defines the macro and replaces it with an inline function that is
+// equivalent; this of course should look the same as having a global macro to
+// most C++ code, but with the advantage of lexically scoping the name of the
+// function so that protobufs can use it too.
+//
+// NOTE: the Windows headers also don't use define-once semantics for the
+// `GetMessage` macro. In particular, this means that every time you include
+// `Winuser.h` and a `GetMessage` macro isn't defined, the Windows headers will
+// redefine it for you. The impact of this is that you should re-un-define the
+// macro every time you include `Windows.h`; since we should be including
+// `Windows.h` only from this file, we un-define it just after we include
+// `Windows.h`.
+#ifdef GetMessage
+inline BOOL GetMessageWindows(
+  LPMSG lpMsg,
+  HWND hWnd,
+  UINT wMsgFilterMin,
+  UINT wMsgFilterMax)
+{
+  return GetMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
+}
+#undef GetMessage
+inline BOOL GetMessage(
+  LPMSG lpMsg,
+  HWND hWnd,
+  UINT wMsgFilterMin,
+  UINT wMsgFilterMax)
+{
+  return GetMessageWindows(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
+}
+#endif
+
+
 // Define constants used for Windows compat. Allows a lot of code on
 // Windows and POSIX systems to be the same, because we can pass the
 // same constants to functions we call to do things like file I/O.
