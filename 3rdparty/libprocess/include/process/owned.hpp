@@ -119,7 +119,13 @@ T* Owned<T>::get() const
   if (data.get() == NULL) {
     return NULL;
   } else {
-    CHECK(data->t != NULL) << "This owned pointer has already been shared";
+    // NOTE: removing the cast to `T*` will cause compile errors on Windows.
+    // One example: in `process/future.hpp`, the function
+    // `process::internal::awaited` contains an expression `latch->trigger`,
+    // which specializes this template on `Latch`. But, the `!=` operator
+    // is ambiguous when applied to `Latch*` on Windows. Our solution is to
+    // insert this harmless cast.
+    CHECK(data->t != (T*)NULL) << "This owned pointer has already been shared";
 
     return data->t;
   }
