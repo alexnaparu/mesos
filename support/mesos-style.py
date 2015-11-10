@@ -8,6 +8,10 @@ import re
 import subprocess
 import sys
 
+from cStringIO import StringIO
+
+import cpplint # The Google C++ linter in our `support/` directory.
+
 # See cpplint.py for full list of rules.
 active_rules = ['build/class',
                 'build/deprecated',
@@ -51,24 +55,64 @@ def find_candidates(root_dir):
             if source_criteria_regex.search(name) is not None:
                 yield path
 
+def lint_and_capture_stderr(rules, source_paths):
+    """Lint source files and capture `stderr` as a string.
+
+    The "normal" way of implementing this is to call `subprocess.Popen`.
+    Normally you redirect `stderr` into a string so you can process it, and
+    set the file descriptors to `CLOEXEC`, but some OSs (e.g., Windows) don't
+    support this.
+
+    Hence, our solution is to simply call the linter manually, and redirect
+    all `stderr` and `stdout` to a string using the `StringIO` API. This
+    works because there isn't any concurrency in the code in this area, and
+    we can get away with swapping the "real" `stderr` back in when we're done.
+
+    Args:
+        rules: The rules to run on our source files.
+        source_paths: The source files to lint.
+
+    Return:
+        A tuple `(errors_found, stderr)`, capturing results of the linter process.
+    """
+    system_stdout = sys.stdout
+    system_stderr = sys.stderr
+
+    # Point `stdout` and `stderr` to a `StringIO` so they can be captured.
+    sys.stdout = linter_stdout = StringIO()
+    sys.stderr = linter_stderr = StringIO()
+
+    # Run linter.
+    filenames = cpplint.ParseArguments([rules] + source_paths)
+    errors_found = cpplint.LintFiles(filenames)
+
+    # Set `stdout` and `stderr` back to normal.
+    sys.stdout = system_stdout
+    sys.stderr = system_stderr
+
+    # NOTE: `stderr` seems to print line breaks as '\n` on the Windows command
+    # prompt, which means that carriage returns are probably added when it's
+    # piped through some tty layer. In any event, we should not have to worry
+    # about carriage return here.
+    return (errors_found, linter_stderr.getvalue().split('\n'))
+
 def run_lint(source_paths):
     rules_filter = '--filter=-,+' + ',+'.join(active_rules)
     print 'Checking ' + str(len(source_paths)) + ' files using filter ' \
         + rules_filter
-    p = subprocess.Popen(
-        ['python', 'support/cpplint.py', rules_filter] + source_paths,
-        stderr=subprocess.PIPE,
-        close_fds=True)
+
+    (errors_found, captured_stderr) = lint_and_capture_stderr(
+        rules_filter,
+        source_paths)
 
     # Lines are stored and filtered, only showing found errors instead
     # of 'Done processing XXX.' which tends to be dominant output.
     lint_out_regex = re.compile(':')
-    for line in p.stderr:
+    for line in captured_stderr:
         if lint_out_regex.search(line) is not None:
-            sys.stdout.write(line)
+            sys.stdout.write(line + '\n')
 
-    p.wait()
-    return p.returncode
+    return errors_found
 
 
 if __name__ == '__main__':
@@ -85,14 +129,18 @@ if __name__ == '__main__':
     candidates = []
     for source_dir in source_dirs:
         for candidate in find_candidates(source_dir):
-            candidates.append(candidate)
+            # Convert all paths to absolute paths to normalize path separators,
+            # which differ by OS.
+            candidates.append(os.path.abspath(candidate))
 
     if len(sys.argv) == 1:
         # No file paths specified, run lint on all candidates.
         sys.exit(run_lint(candidates))
     else:
         # File paths specified, run lint on all file paths that are candidates.
-        file_paths = sys.argv[1:]
+        # NOTE: Convert to absolute path to normalize path separators, which
+        # differ by OS.
+        file_paths = map(os.path.abspath, sys.argv[1:])
 
         # Compute the set intersect of the input file paths and candidates.
         # This represents the reduced set of candidates to run lint on.
