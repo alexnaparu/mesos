@@ -24,7 +24,7 @@ exec 1>&2
 git diff-index --check --cached $against -- || exit 1
 
 # Check Mesos style.
-git diff --cached --name-only --diff-filter=AM | xargs ./support/mesos-style.py || exit 1
+git diff --cached --name-only --diff-filter=AM | xargs -r ./support/mesos-style.py || exit 1
 
 # Check that the commits are properly split between mesos, libprocess and stout.
-git diff --cached --name-only --diff-filter=AMD | xargs ./support/mesos_split.py || exit 1
+git diff --cached --name-only --diff-filter=AMD | xargs -r ./support/mesos_split.py || exit 1
