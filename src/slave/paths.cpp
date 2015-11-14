@@ -22,10 +22,14 @@
 
 
 #include <stout/check.hpp>
+#include <stout/os/chown.hpp>
+#include <stout/os/exists.hpp>
 #include <stout/fs.hpp>
+#include <stout/os/mkdir.hpp>
 #include <stout/nothing.hpp>
-#include <stout/os.hpp>
 #include <stout/path.hpp>
+#include <stout/os/rm.hpp>
+#include <stout/os/rmdir.hpp>
 #include <stout/try.hpp>
 
 #include "messages/messages.hpp"
