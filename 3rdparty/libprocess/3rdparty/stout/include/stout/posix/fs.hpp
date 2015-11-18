@@ -19,10 +19,10 @@
 
 #include <string>
 
-#include "bytes.hpp"
-#include "error.hpp"
-#include "nothing.hpp"
-#include "try.hpp"
+#include "stout/bytes.hpp"
+#include "stout/error.hpp"
+#include "stout/nothing.hpp"
+#include "stout/try.hpp"
 
 // TODO(bmahler): Merge available() and usage() into df() that returns
 // a struct, and move this back into os.hpp.

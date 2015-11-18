@@ -16,6 +16,7 @@
 
 #include <string>
 
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace os {

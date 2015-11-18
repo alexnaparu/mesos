@@ -14,10 +14,13 @@
 #ifndef __STOUT_OS_POSIX_CHOWN_HPP__
 #define __STOUT_OS_POSIX_CHOWN_HPP__
 
+#include <sys/types.h>
+#include <pwd.h>
+
+#include <stout/error.hpp>
 #include <stout/nothing.hpp>
 #include <stout/try.hpp>
-
-#include <stout/windows/error.hpp>
+#include <stout/os/posix/system.hpp>
 
 
 namespace os {
