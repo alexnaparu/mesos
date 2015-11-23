@@ -75,6 +75,7 @@
 
 #include <stout/os/bootid.hpp>
 #include <stout/os/chdir.hpp>
+#include <stout/os/chown.hpp>
 #include <stout/os/environment.hpp>
 #include <stout/os/find.hpp>
 #include <stout/os/fork.hpp>

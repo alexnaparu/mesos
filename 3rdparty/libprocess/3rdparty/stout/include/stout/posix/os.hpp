@@ -132,50 +132,6 @@ inline int execvpe(const char* file, char** argv, char** envp)
 }
 
 
-inline Try<Nothing> chown(
-    uid_t uid,
-    gid_t gid,
-    const std::string& path,
-    bool recursive)
-{
-  if (recursive) {
-    // TODO(bmahler): Consider walking the file tree instead. We would need
-    // to be careful to not miss dotfiles.
-    std::string command =
-      "chown -R " + stringify(uid) + ':' + stringify(gid) + " '" + path + "'";
-
-    int status = os::system(command);
-    if (status != 0) {
-      return ErrnoError(
-          "Failed to execute '" + command +
-          "' (exit status: " + stringify(status) + ")");
-    }
-  } else {
-    if (::chown(path.c_str(), uid, gid) < 0) {
-      return ErrnoError();
-    }
-  }
-
-  return Nothing();
-}
-
-
-// Changes the specified path's user and group ownership to that of
-// the specified user.
-inline Try<Nothing> chown(
-    const std::string& user,
-    const std::string& path,
-    bool recursive = true)
-{
-  passwd* passwd;
-  if ((passwd = ::getpwnam(user.c_str())) == NULL) {
-    return ErrnoError("Failed to get user information for '" + user + "'");
-  }
-
-  return chown(passwd->pw_uid, passwd->pw_gid, path, recursive);
-}
-
-
 inline Try<Nothing> chmod(const std::string& path, int mode)
 {
   if (::chmod(path.c_str(), mode) < 0) {
