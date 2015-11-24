@@ -14,11 +14,13 @@
 #ifndef __STOUT_INTERNAL_WINDOWS_REPARSEPOINT_HPP__
 #define __STOUT_INTERNAL_WINDOWS_REPARSEPOINT_HPP__
 
+#include <mutex>
 #include <string>
 
+#include <stout/nothing.hpp>
+#include <stout/os/mkdir.hpp>
 #include <stout/try.hpp>
 #include <stout/windows.hpp>
-
 
 namespace internal {
 namespace windows {
@@ -64,8 +66,8 @@ typedef struct _REPARSE_DATA_BUFFER
   };
 } REPARSE_DATA_BUFFER;
 
-#define REPARSE_MOUNTPOINT_HEADER_SIZE 8
-
+#define REPARSE_DATA_BUFFER_HEADER_SIZE \
+  FIELD_OFFSET(REPARSE_DATA_BUFFER, GenericReparseBuffer)
 
 // Convenience struct for holding symlink data.
 struct SymbolicLink
@@ -92,32 +94,33 @@ inline bool reparsePointAttributeSet(const std::string& absolutePath)
 
 // Attempts to extract symlink data out of a `REPARSE_DATA_BUFFER` (which could
 // hold other things, e.g., mount point data).
-inline Try<SymbolicLink> buildSymbolicLink(const REPARSE_DATA_BUFFER& data)
+inline Try<SymbolicLink> buildSymbolicLink(
+  const std::shared_ptr<REPARSE_DATA_BUFFER>& data)
 {
-  const bool isSymLink = (data.ReparseTag & IO_REPARSE_TAG_SYMLINK) != 0;
+  const bool isSymLink = (data.get()->ReparseTag & IO_REPARSE_TAG_SYMLINK) != 0;
 
   if (!isSymLink) {
     return Error("Data buffer is not a symlink");
   }
 
   const int targetNameStartIndex =
-    data.SymbolicLinkReparseBuffer.SubstituteNameOffset / 2;
+    data.get()->SymbolicLinkReparseBuffer.SubstituteNameOffset / 2;
   const int targetNameLength =
-    data.SymbolicLinkReparseBuffer.SubstituteNameLength / 2;
+    data.get()->SymbolicLinkReparseBuffer.SubstituteNameLength / 2;
   const WCHAR* targetName =
-    &data.SymbolicLinkReparseBuffer.PathBuffer[targetNameStartIndex];
+    &data.get()->SymbolicLinkReparseBuffer.PathBuffer[targetNameStartIndex];
 
   const int printNameStartIndex =
-    data.SymbolicLinkReparseBuffer.PrintNameOffset / 2;
+    data.get()->SymbolicLinkReparseBuffer.PrintNameOffset / 2;
   const int printNameLength =
-    data.SymbolicLinkReparseBuffer.PrintNameLength / 2;
+    data.get()->SymbolicLinkReparseBuffer.PrintNameLength / 2;
   const WCHAR* displayName =
-    &data.SymbolicLinkReparseBuffer.PathBuffer[printNameStartIndex];
+    &data.get()->SymbolicLinkReparseBuffer.PathBuffer[printNameStartIndex];
 
   struct SymbolicLink symlink;
   symlink.substituteName.assign(targetName, targetName + targetNameLength);
   symlink.printName.assign(displayName, displayName + printNameLength);
-  symlink.flags = data.SymbolicLinkReparseBuffer.Flags;
+  symlink.flags = data.get()->SymbolicLinkReparseBuffer.Flags;
 
   return symlink;
 }
@@ -126,7 +129,9 @@ inline Try<SymbolicLink> buildSymbolicLink(const REPARSE_DATA_BUFFER& data)
 // Attempts to get a file or folder handle for an absolute path, and does not
 // follow symlinks. That is, if the path points at a symlink, the handle will
 // refer to the symlink rather than the file or folder the symlink points at.
-inline Try<HANDLE> getHandleNoFollow(const std::string& absolutePath)
+inline Try<HANDLE> getHandleNoFollow(
+  const std::string& absolutePath,
+  bool write = false)
 {
   struct _stat s;
   bool resolvedPathIsDirectory = false;
@@ -135,17 +140,13 @@ inline Try<HANDLE> getHandleNoFollow(const std::string& absolutePath)
     resolvedPathIsDirectory = S_ISDIR(s.st_mode);
   }
 
-  // NOTE: The `CreateFile` documentation[1] tells us which flags we need to
-  // invoke to open a handle that will point at the symlink instead of the
-  // folder or file it points at. The short answer is that you need to be sure
-  // to pass in `OPEN_EXISTING` and `FILE_FLAG_OPEN_REPARSE_POINT` to get a
-  // handle for the symlink and not the file the symlink points to.
+  // NOTE: According to the `CreateFile` documentation[1], the `OPEN_EXISTING`
+  // and `FILE_FLAG_OPEN_REPARSE_POINT` flags need to be used when getting a
+  // handle for the symlink
   //
   // Note also that `CreateFile` will appropriately generate a handle for
-  // either a folder of a file (they are different!), as long as you
-  // appropriately set a magic flag, `FILE_FLAG_BACKUP_SEMANTICS`. It is not
-  // clear why, or what this flag means, the documentation[1] only says it's
-  // necessary.
+  // either a folder of a file, as long as the appropriate flag is being set:
+  // `FILE_FLAG_BACKUP_SEMANTICS` or `FILE_FLAG_OPEN_REPARSE_POINT`.
   //
   // [1] https://msdn.microsoft.com/en-us/library/windows/desktop/aa363858(v=vs.85).aspx
   const DWORD accessFlags = resolvedPathIsDirectory
@@ -154,15 +155,17 @@ inline Try<HANDLE> getHandleNoFollow(const std::string& absolutePath)
 
   const HANDLE handle = CreateFile(
     absolutePath.c_str(),
-    0,              // Ignored.
-    0,              // Ignored.
+    write ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ,
+    write ? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE :
+            FILE_SHARE_READ,
     NULL,           // Ignored.
     OPEN_EXISTING,  // Open existing symlink.
     accessFlags,    // Open symlink, not the file it points to.
     NULL);          // Ignored.
 
   if (handle == INVALID_HANDLE_VALUE) {
-    return Error("TODO");
+    return WindowsError("internal::windows::getSymbolicLinkData` \
+      CreateFile call failed");
   }
 
   return handle;
@@ -173,31 +176,27 @@ inline Try<HANDLE> getHandleNoFollow(const std::string& absolutePath)
 inline Try<SymbolicLink> getSymbolicLinkData(const HANDLE& handle)
 {
   // To get the symlink data, we call `DeviceIoControl`. This function is part
-  // of the Device Driver Kit (DDK), and buried away in a corner of the
-  // DDK documentation[1] is an incomplete explanation of how to twist API to
-  // get it to emit information about reparse points (and, thus, symlinks,
-  // since symlinks are implemented with reparse points). This technique is a
-  // hack, but it is used pretty much everywhere, including the Boost FS code,
-  // though it's worth noting that they seem to use it incorrectly[2].
+  // of the Device Driver Kit (DDK)[1] and, along with FSCTL_GET_REPARSE_POINT
+  // is used to emit information about reparse points (and, thus, symlinks,
+  // since symlinks are implemented with reparse points). This technique is
+  // being used in Boost FS code as well[2].
   //
-  // Summarized, the documentation tells us that we need to pass in the magic
-  // flag `FSCTL_GET_REPARSE_POINT` to get the function to populate a
-  // `REPARSE_DATA_BUFFER` struct with data about a reparse point. What it
-  // doesn't tell you is that this struct is in a header in the DDK, so in
-  // order to get information about the reparse point, you must either take a
-  // dependency on the DDK, or copy the struct from the header into your code.
-  // We take a cue from Boost FS, and copy the struct into this header (see
-  // above).
+  // Summarized, the documentation tells us that we need to pass in
+  // `FSCTL_GET_REPARSE_POINT` to get the function to populate a
+  // `REPARSE_DATA_BUFFER` struct with data about a reparse point.
+  // The `REPARSE_DATA_BUFFER` struct is defined in a DDK header file,
+  // so to avoid bringing in a multitude of DDK headers we take a cue from
+  // Boost FS, and copy the struct into this header (see above).
   //
-  // Finally, for context, it may be worth looking at the (sparse)
-  // documentation for `DeviceIoControl` itself.
+  // Finally, for context, it may be worth looking at the MSDN
+  // documentation[3] for `DeviceIoControl` itself.
   //
   // [1] https://msdn.microsoft.com/en-us/library/windows/desktop/aa364571(v=vs.85).aspx
   // [2] https://svn.boost.org/trac/boost/ticket/4663
   // [3] https://msdn.microsoft.com/en-us/library/windows/desktop/aa363216(v=vs.85).aspx
 
-  REPARSE_DATA_BUFFER* reparsePointData =
-    (REPARSE_DATA_BUFFER*)malloc(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
+  std::shared_ptr<REPARSE_DATA_BUFFER> reparsePointData(
+    (REPARSE_DATA_BUFFER*)(new BYTE[MAXIMUM_REPARSE_DATA_BUFFER_SIZE]));
   const size_t reparsePointDataSize = MAXIMUM_REPARSE_DATA_BUFFER_SIZE;
   const DWORD junk = 0;
 
@@ -209,19 +208,345 @@ inline Try<SymbolicLink> getSymbolicLinkData(const HANDLE& handle)
     FSCTL_GET_REPARSE_POINT, // Gets reparse point data for file/folder handle.
     NULL,                    // Ignored.
     0,                       // Ignored.
-    (LPVOID)reparsePointData,
+    reparsePointData.get(),
     reparsePointDataSize,
     (LPDWORD)&junk,          // Ignored.
     NULL);                   // Ignored.
 
   if (!reparseDataObtained) {
-    free(reparsePointData);
-    return Error("TODO");
+    return WindowsError("internal::windows::getSymbolicLinkData` \
+      DeviceIoControl call failed");
   }
 
-  Try<SymbolicLink> symlink = buildSymbolicLink(*reparsePointData);
-  free(reparsePointData);
+  Try<SymbolicLink> symlink = buildSymbolicLink(reparsePointData);
   return symlink;
+}
+
+
+Try<Nothing> adjustCurrentTokenPrivileges(
+  LPCSTR privilegeName,
+  bool revokePrivilege,
+  bool& privilegeHeld)
+{
+  HANDLE hToken;
+
+  // Open a token to the current process
+  if (!::OpenProcessToken(
+          ::GetCurrentProcess(),
+          TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+          &hToken)
+    ) {
+    return WindowsError("internal::windows::adjustCurrentTokenPrivileges` \
+      OpenProcessToken call failed");
+  }
+
+  std::shared_ptr<void> hSafeToken (hToken, ::CloseHandle);
+
+  // Find specified privilege by string name
+  LUID privilegeLuid;
+  if (!::LookupPrivilegeValue(NULL,
+                        privilegeName,
+                        &privilegeLuid)) {
+    return WindowsError("internal::windows::adjustCurrentTokenPrivileges` \
+      LookupPrivilegeValue call failed");
+  }
+
+  // Check whether the privilege is already held
+  PRIVILEGE_SET privileges;
+  privileges.PrivilegeCount = 1;
+  privileges.Control = PRIVILEGE_SET_ALL_NECESSARY;
+  privileges.Privilege[0].Luid = privilegeLuid;
+  privileges.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+  BOOL privilegeEnabled;
+  if (!::PrivilegeCheck(hSafeToken.get(), &privileges, &privilegeEnabled))
+  {
+    return WindowsError("internal::windows::adjustCurrentTokenPrivileges` \
+      PrivilegeCheck call failed");
+  }
+
+  privilegeHeld = privilegeEnabled;
+
+  if (!revokePrivilege && !privilegeHeld || revokePrivilege && privilegeHeld)
+  {
+      // Adjust privileges for current token as needed
+      TOKEN_PRIVILEGES tp;
+      tp.PrivilegeCount = 1;
+      tp.Privileges[0].Attributes = revokePrivilege ? SE_PRIVILEGE_REMOVED :
+                                    SE_PRIVILEGE_ENABLED;
+      tp.Privileges[0].Luid = privilegeLuid;
+
+      if (!::AdjustTokenPrivileges(
+            hSafeToken.get(),
+            FALSE,
+            &tp,
+            sizeof(TOKEN_PRIVILEGES),
+            NULL,
+            NULL)
+        ) {
+        return WindowsError("internal::windows::adjustCurrentTokenPrivileges` \
+          AdjustTokenPrivileges call failed");
+    }
+  }
+
+  if (!::PrivilegeCheck(hSafeToken.get(), &privileges, &privilegeEnabled))
+  {
+      return WindowsError("internal::windows::adjustCurrentTokenPrivileges` \
+        PrivilegeCheck call failed");
+  }
+
+  return Nothing();
+}
+
+
+Try<Nothing> createReparsePoint(
+  const std::string& reparsePoint,
+  const std::string& target)
+{
+  bool isFolder = true;
+
+  // Normalize input paths
+  const Result<std::string> realReparsePointPath = os::realpath(reparsePoint);
+  const Result<std::string> realTargetPath = os::realpath(target);
+
+  if (!realReparsePointPath.isSome()) {
+    return Error(realReparsePointPath.error());
+  }
+
+  if (!realTargetPath.isSome()) {
+    return Error(realTargetPath.error());
+  }
+
+  const std::string& absoluteReparsePointPath(realReparsePointPath.get());
+  const std::string& absoluteTargetPath(realTargetPath.get());
+
+  // Determine if target is a folder or a file. This makes a difference
+  // in the way we open the file and call DeviceIoControl
+  struct _stat s;
+  if (::_stat(absoluteTargetPath.c_str(), &s) >= 0) {
+    isFolder = S_ISDIR(s.st_mode);
+  }
+
+  // Bail out if target is already a reparse point
+  if (reparsePointAttributeSet(absoluteTargetPath)) {
+    return Error("Path `" + absoluteTargetPath +
+      "` is already a reparse point");
+  }
+
+  // Create a non-parsed path to the target. The best way to do this would be
+  // to call NtQueryInformationFile as described in [1] and get the file name
+  // information. Alternately, GetFinalPathNameByHandle (as described in [2]
+  // could be used, although that would require opening the file first. For
+  // files stored on the local filesystem, however, prefixing the DOS path with
+  // "\??\" is enough to tell the kernel where to find the file
+  //
+  // [1] https://msdn.microsoft.com/en-us/library/windows/hardware/ff556646(v=vs.85).aspx
+  //
+  // [2] https://msdn.microsoft.com/en-us/library/aa364962.aspx
+
+  std::string ntTarget("\\??\\" + absoluteTargetPath);
+
+  // Allocate a the full REPARSE_DATA_BUFFER structure (also contains the
+  // PathBuffer in the form of <target>\0). These paths use wide chars, so
+  // double the space is needed (see [3] for details)
+  //
+  // [3] https://msdn.microsoft.com/en-us/library/windows/desktop/ff552012(v=vs.85).aspx
+  //
+  // Symlink path is copied twice into the buffer - once for PrintName and
+  // once for SubstituteName. The SymbolicLinkReparseBuffer array looks like
+  // this: <NT target>\0<target>\0, where "NT target" is the non-parsed path
+  // (e.g. \??\C:\temp\file.txt instead of C:\temp\file.txt)
+
+  unsigned long pathBufferSize =
+    // target path and trailing NULL
+    (absoluteTargetPath.size() + 1) * sizeof(WCHAR) +
+    // non-parsed target path and trailing NULL
+    (ntTarget.size() + 1) * sizeof(WCHAR);
+
+  unsigned long bufferSize =  pathBufferSize +
+    (isFolder ?
+      FIELD_OFFSET(REPARSE_DATA_BUFFER,
+        MountPointReparseBuffer.PathBuffer[0]) :
+      FIELD_OFFSET(REPARSE_DATA_BUFFER,
+        SymbolicLinkReparseBuffer.PathBuffer[0]));
+
+  std::shared_ptr<REPARSE_DATA_BUFFER> reparseBuffer(
+    (REPARSE_DATA_BUFFER*)(new BYTE[bufferSize]));
+
+  ::ZeroMemory(reparseBuffer.get(), bufferSize);
+
+  // SubstituteName offset in WCHAR positions
+  unsigned long printNameOffset = ntTarget.size() + 1;
+  WCHAR *pathBuffer = isFolder ?
+    reparseBuffer->MountPointReparseBuffer.PathBuffer :
+    reparseBuffer->SymbolicLinkReparseBuffer.PathBuffer;
+
+  // Convert target and ntTarget paths from char* to WCHAR*
+  if (!::MultiByteToWideChar(
+        CP_ACP,           // system default Windows ANSI code page.
+        0,                // no flags
+        ntTarget.c_str(),
+        -1,               // copy entire string, including trailing NULL
+        pathBuffer,
+        ntTarget.size() + 1
+      )) {
+    return WindowsError("`internal::windows::createReparsePoint` \
+      MultiByteToWideChar call failed");
+  }
+
+  if (!::MultiByteToWideChar(
+        CP_ACP,           // system default Windows ANSI code page.
+        0,                // no flags
+        absoluteTargetPath.c_str(),
+        -1,               // copy entire string, including trailing NULL
+        pathBuffer + printNameOffset,
+        absoluteTargetPath.size() + 1
+      )) {
+    return WindowsError("`internal::windows::createReparsePoint` \
+      MultiByteToWideChar call failed");
+  }
+
+  // Set proper offsets and lengths for reparse point target/name. Convert
+  // all values from WCHAR positions to bytes[4])
+  //
+  //  [4] https://msdn.microsoft.com/en-us/library/windows/desktop/aa364595(v=vs.85).aspx
+
+  if (isFolder) {
+    reparseBuffer->MountPointReparseBuffer.SubstituteNameOffset = 0;
+    reparseBuffer->MountPointReparseBuffer.SubstituteNameLength =
+      ntTarget.size() * sizeof(WCHAR);
+    reparseBuffer->MountPointReparseBuffer.PrintNameOffset =
+      printNameOffset * sizeof(WCHAR);
+    reparseBuffer->MountPointReparseBuffer.PrintNameLength =
+      absoluteTargetPath.size() * sizeof(WCHAR);
+    reparseBuffer->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
+  }
+  else {
+    reparseBuffer->SymbolicLinkReparseBuffer.SubstituteNameOffset = 0;
+    reparseBuffer->SymbolicLinkReparseBuffer.SubstituteNameLength =
+      ntTarget.size() * sizeof(WCHAR);
+    reparseBuffer->SymbolicLinkReparseBuffer.PrintNameOffset =
+      printNameOffset * sizeof(WCHAR);
+    reparseBuffer->SymbolicLinkReparseBuffer.PrintNameLength =
+      absoluteTargetPath.size() * sizeof(WCHAR);
+    reparseBuffer->SymbolicLinkReparseBuffer.Flags = 0;
+    reparseBuffer->ReparseTag = IO_REPARSE_TAG_SYMLINK;
+  }
+
+  reparseBuffer->ReparseDataLength = (USHORT)(bufferSize -
+    REPARSE_DATA_BUFFER_HEADER_SIZE);
+
+  // Mount points can only be created on empty folders.
+  // Create one if it doesn't already exist.
+  bool isDirectoryCleanupNeeded = false;
+  if (isFolder) {
+      if (::_stat(absoluteReparsePointPath.c_str(), &s) < 0) {
+          // FIX: mkdir should receive the normalized path, once the
+          // tokenization bug in os::mkdir is fixed
+          Try<Nothing> result = os::mkdir(reparsePoint);
+          if (result.isError()) {
+              return result;
+          }
+          isDirectoryCleanupNeeded = true;
+      }
+      else {
+          // Path already exists, attempt mount point creation
+          // only if it's a folder
+          if (!S_ISDIR(s.st_mode)) {
+              return Error("Path `" + absoluteReparsePointPath +
+                "` is not a directory");
+          }
+      }
+  }
+
+  // Get symlink or mount point creation privileges for the current process.
+  // Use a mutex to prevent a condition where one thread grants
+  // the privilege and another one revokes it before DeviceIoControl is called.
+  //
+  static std::mutex adjustPrivilegesMutex;
+  adjustPrivilegesMutex.lock();
+
+  bool isPrivilegeHeld = true;
+  Try<Nothing> result = adjustCurrentTokenPrivileges(
+      isFolder ? SE_RESTORE_NAME : SE_CREATE_SYMBOLIC_LINK_NAME,
+      false, // enabled privilege
+      isPrivilegeHeld);
+
+  if (result.isError())
+  {
+      if (isDirectoryCleanupNeeded) {
+          ::rmdir(absoluteReparsePointPath.c_str());
+      }
+      adjustPrivilegesMutex.unlock();
+      return result;
+  }
+
+  // Create scoped handle to symlink file
+  std::shared_ptr<void> hSymlink(
+      ::CreateFile(absoluteReparsePointPath.c_str(),
+          GENERIC_WRITE,
+          0,
+          NULL,
+          // Open existing mount point, but create symlink file
+          isFolder ? OPEN_EXISTING : CREATE_ALWAYS,
+          isFolder ? FILE_FLAG_BACKUP_SEMANTICS : FILE_ATTRIBUTE_NORMAL,
+          NULL),
+      ::CloseHandle
+      );
+
+  if (hSymlink.get() == INVALID_HANDLE_VALUE) {
+      if (isDirectoryCleanupNeeded) {
+          ::rmdir(absoluteReparsePointPath.c_str());
+      }
+
+      adjustPrivilegesMutex.unlock();
+      return WindowsError("`internal::windows::createReparsePoint` CreateFile \
+        failed to open `" + absoluteReparsePointPath + "`");
+  }
+
+  // Token has the required privileges now, call DeviceIoControl
+  if (!::DeviceIoControl(
+      hSymlink.get(),
+      FSCTL_SET_REPARSE_POINT,
+      reparseBuffer.get(),
+      bufferSize,
+      NULL, // Reserved
+      0,    // Reserved
+      NULL, // Reserved
+      // No overlapping needed, handle was not opened with FILE_FLAG_OVERLAPPED
+      NULL)
+    ) {
+    result = WindowsError("`internal::windows::createReparsePoint` \
+      DeviceIoControl call failed");
+  }
+  else {
+      // DeviceIoControl succeeded, folder cleanup is no longer needed
+      isDirectoryCleanupNeeded = false;
+  }
+
+  // Restore token privileges if not held before this function was called
+  if (!isPrivilegeHeld)
+  {
+    Try<Nothing> adjustTokenResult = adjustCurrentTokenPrivileges(
+        isFolder ? SE_RESTORE_NAME : SE_CREATE_SYMBOLIC_LINK_NAME,
+        true, // remove privilege
+        isPrivilegeHeld);
+
+    // DeviceIoControl error takes precedence over adjustCurrentTokenPrivileges
+    if (!result.isError()) {
+        result = adjustTokenResult;
+    }
+  }
+
+  adjustPrivilegesMutex.unlock();
+
+  if (isDirectoryCleanupNeeded)
+  {
+      // Non-recursively delete the directory we created if the function failed
+      ::rmdir(absoluteReparsePointPath.c_str());
+  }
+
+  return result;
 }
 
 } // namespace windows {
