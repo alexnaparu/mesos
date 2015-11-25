@@ -17,11 +17,13 @@
 #include <set>
 #include <string>
 
+#include <stout/fs.hpp>
 #include <stout/path.hpp>
 #include <stout/uuid.hpp>
 
 #include <stout/os/find.hpp>
 #include <stout/os/getcwd.hpp>
+#include <stout/os/glob.hpp>
 #include <stout/os/mkdir.hpp>
 #include <stout/os/ls.hpp>
 #include <stout/os/read.hpp>
@@ -139,4 +141,52 @@ TEST_F(FsTest, Touch)
 
   ASSERT_SOME(os::touch(testfile));
   ASSERT_TRUE(os::exists(testfile));
+}
+
+TEST_F(FsTest, Symlink)
+{
+  const string tempPath = os::getcwd();
+  const string symlinkPath = path::join(tempPath, "/sym.link");
+  const string symlinkTarget = path::join(tempPath, UUID::random().toString());
+
+  // Create file
+  ASSERT_SOME(os::touch(symlinkTarget))
+      << "Failed to create file '" << symlinkTarget << "'";
+  ASSERT_TRUE(os::exists(symlinkTarget));
+
+  // Create symlink
+  fs::symlink(symlinkTarget, symlinkPath);
+
+  // Test symlink
+  ASSERT_TRUE(os::stat::islink(symlinkPath));
+}
+
+
+TEST_F(FsTest, Glob)
+{
+  const string testdir = path::join(os::getcwd(), UUID::random().toString());
+  ASSERT_SOME(os::mkdir(testdir)); // Create the directories.
+
+  // Now write some files.
+  const string file1 = testdir + "/file1.txt";
+  const string file2 = testdir + "/file2.txt";
+  const string file3 = testdir + "/file3.jpg";
+
+  ASSERT_SOME(os::touch(file1));
+  ASSERT_SOME(os::touch(file2));
+  ASSERT_SOME(os::touch(file3));
+
+  // Search all files in folder
+  Try<std::list<std::string>> allFiles = os::glob(path::join(testdir, "*"));
+  ASSERT_TRUE(allFiles.get().size() == 3);
+
+  // Search .jpg files in folder
+  Try<std::list<std::string>> jpgFiles = os::glob(path::join(testdir, "*.jpg"));
+  ASSERT_TRUE(jpgFiles.get().size() == 1);
+
+  // Search test*.txt files in folder
+  Try<std::list<std::string>> testTxtFiles =
+    os::glob(path::join(testdir, "*.txt"));
+
+  ASSERT_TRUE(testTxtFiles.get().size() == 2);
 }
