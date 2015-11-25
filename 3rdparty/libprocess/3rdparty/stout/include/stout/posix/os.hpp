@@ -50,6 +50,7 @@
 #include <string>
 #include <vector>
 
+#include <stout/attributes.hpp>
 #include <stout/bytes.hpp>
 #include <stout/duration.hpp>
 #include <stout/error.hpp>
@@ -67,6 +68,7 @@
 #include <stout/os/exists.hpp>
 #include <stout/os/fcntl.hpp>
 #include <stout/os/fork.hpp>
+
 #ifdef __FreeBSD__
 #include <stout/os/freebsd.hpp>
 #endif
@@ -371,7 +373,9 @@ inline Try<Nothing> sleep(const Duration& duration)
 
 
 // Returns the list of files that match the given (shell) pattern.
-inline Try<std::list<std::string>> glob(const std::string& pattern)
+// Since ::glob() is only supported on POSIX, this function is marked as
+// `DEPRECATED`.
+inline DEPRECATED Try<std::list<std::string>> glob(const std::string& pattern)
 {
   glob_t g;
   int status = ::glob(pattern.c_str(), GLOB_NOSORT, NULL, &g);

@@ -20,5 +20,10 @@
 #define NORETURN __attribute__((noreturn))
 #endif // __WINDOWS__
 
+#ifdef __WINDOWS__
+#define DEPRECATED __declspec(deprecated)
+#else
+#define DEPRECATED __attribute__((deprecated))
+#endif // __WINDOWS__
 
 #endif // __STOUT_ATTRIBUTES_HPP__
