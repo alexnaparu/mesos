@@ -23,7 +23,6 @@
 
 #include <stout/os/find.hpp>
 #include <stout/os/getcwd.hpp>
-#include <stout/os/glob.hpp>
 #include <stout/os/mkdir.hpp>
 #include <stout/os/ls.hpp>
 #include <stout/os/read.hpp>
@@ -162,7 +161,7 @@ TEST_F(FsTest, Symlink)
 }
 
 
-TEST_F(FsTest, Glob)
+TEST_F(FsTest, List)
 {
   const string testdir = path::join(os::getcwd(), UUID::random().toString());
   ASSERT_SOME(os::mkdir(testdir)); // Create the directories.
@@ -177,16 +176,16 @@ TEST_F(FsTest, Glob)
   ASSERT_SOME(os::touch(file3));
 
   // Search all files in folder
-  Try<std::list<std::string>> allFiles = os::glob(path::join(testdir, "*"));
+  Try<std::list<std::string>> allFiles = fs::list(path::join(testdir, "*"));
   ASSERT_TRUE(allFiles.get().size() == 3);
 
   // Search .jpg files in folder
-  Try<std::list<std::string>> jpgFiles = os::glob(path::join(testdir, "*.jpg"));
+  Try<std::list<std::string>> jpgFiles = fs::list(path::join(testdir, "*.jpg"));
   ASSERT_TRUE(jpgFiles.get().size() == 1);
 
   // Search test*.txt files in folder
   Try<std::list<std::string>> testTxtFiles =
-    os::glob(path::join(testdir, "*.txt"));
+    fs::list(path::join(testdir, "*.txt"));
 
   ASSERT_TRUE(testTxtFiles.get().size() == 2);
 }
