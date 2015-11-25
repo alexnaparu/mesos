@@ -22,7 +22,6 @@ nobase_include_HEADERS =		\
   stout/duration.hpp			\
   stout/dynamiclibrary.hpp		\
   stout/error.hpp			\
-  stout/errorbase.hpp			\
   stout/exit.hpp			\
   stout/flags.hpp			\
   stout/flags/fetch.hpp			\
@@ -36,7 +35,6 @@ nobase_include_HEADERS =		\
   stout/gzip.hpp			\
   stout/hashmap.hpp			\
   stout/hashset.hpp			\
-  stout/internal/windows/dirent.hpp	\
   stout/internal/windows/grp.hpp	\
   stout/internal/windows/pwd.hpp	\
   stout/internal/windows/symlink.hpp	\
@@ -58,6 +56,7 @@ nobase_include_HEADERS =		\
   stout/os.hpp				\
   stout/os/bootid.hpp			\
   stout/os/chdir.hpp			\
+  stout/os/chown.hpp      \
   stout/os/close.hpp			\
   stout/os/constants.hpp		\
   stout/os/environment.hpp		\
@@ -71,8 +70,8 @@ nobase_include_HEADERS =		\
   stout/os/linux.hpp			\
   stout/os/ls.hpp			\
   stout/os/mkdir.hpp			\
-  stout/os/mkdtemp.hpp			\
   stout/os/mktemp.hpp			\
+  stout/os/mkdtemp.hpp		\
   stout/os/open.hpp			\
   stout/os/os.hpp			\
   stout/os/osx.hpp			\
@@ -94,13 +93,16 @@ nobase_include_HEADERS =		\
   stout/os/utime.hpp			\
   stout/os/write.hpp			\
   stout/os/posix/bootid.hpp		\
+  stout/os/posix/chown.hpp    \
   stout/os/posix/exists.hpp		\
   stout/os/posix/fcntl.hpp		\
   stout/os/posix/fork.hpp		\
   stout/os/posix/ftruncate.hpp		\
+  stout/os/posix/fs.hpp		\
   stout/os/posix/killtree.hpp		\
   stout/os/posix/ls.hpp			\
   stout/os/posix/mkdtemp.hpp		\
+  stout/os/posix/process.hpp		\
   stout/os/posix/pstree.hpp		\
   stout/os/posix/rmdir.hpp		\
   stout/os/posix/sendfile.hpp		\
@@ -109,13 +111,16 @@ nobase_include_HEADERS =		\
   stout/os/posix/stat.hpp		\
   stout/os/raw/environment.hpp		\
   stout/os/windows/bootid.hpp		\
+  stout/os/windows/chown.hpp    \
   stout/os/windows/exists.hpp		\
   stout/os/windows/fcntl.hpp		\
   stout/os/windows/fork.hpp		\
+  stout/os/windows/fs.hpp		\
   stout/os/windows/ftruncate.hpp	\
   stout/os/windows/killtree.hpp		\
   stout/os/windows/ls.hpp		\
   stout/os/windows/mkdtemp.hpp		\
+  stout/os/windows/process.hpp		\
   stout/os/windows/pstree.hpp		\
   stout/os/windows/rmdir.hpp		\
   stout/os/windows/sendfile.hpp		\
