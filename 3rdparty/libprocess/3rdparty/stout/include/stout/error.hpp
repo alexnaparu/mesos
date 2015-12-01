@@ -51,4 +51,12 @@ public:
     : Error(message + ": " + os::strerror(errno)) {}
 };
 
+
+class ErrorNotSupported : public Error
+{
+public:
+  ErrorNotSupported() : Error("The operation is not \
+    supported by the current platform") {}
+};
+
 #endif // __STOUT_ERROR_HPP__

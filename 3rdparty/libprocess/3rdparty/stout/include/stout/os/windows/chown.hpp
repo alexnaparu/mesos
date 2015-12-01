@@ -14,29 +14,31 @@
 #ifndef __STOUT_OS_WINDOWS_CHOWN_HPP__
 #define __STOUT_OS_WINDOWS_CHOWN_HPP__
 
+#include <stout/error.hpp>
 #include <stout/nothing.hpp>
 #include <stout/try.hpp>
 
+
 namespace os {
 
-// Windows doesn't implement chown, so this is a no-op
+// Windows doesn't implement chown, return ErrorNotSupported
 inline Try<Nothing> chown(
     uid_t uid,
     gid_t gid,
     const std::string& path,
     bool recursive)
 {
-  return Nothing();
+  return ErrorNotSupported();
 }
 
 
-// Windows doesn't implement chown, so this is a no-op
+// Windows doesn't implement chown, return ErrorNotSupported
 inline Try<Nothing> chown(
     const std::string& user,
     const std::string& path,
     bool recursive = true)
 {
-  return Nothing();
+  return ErrorNotSupported();
 }
 
 } // namespace os {

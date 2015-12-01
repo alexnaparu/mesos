@@ -62,6 +62,9 @@ public:
   Try(const ErrnoError& error)
     : message(error.message) {}
 
+  Try(const ErrorNotSupported& error)
+    : message(error.message) {}
+
 #ifdef __WINDOWS__
   Try(const WindowsError& error)
     : message(error.message) {}
