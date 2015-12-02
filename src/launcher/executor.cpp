@@ -350,11 +350,11 @@ public:
       if (override.isNone()) {
         if (task.command().shell()) {
           execlp(
-              "sh",
-              "sh",
-              "-c",
-              task.command().value().c_str(),
-              (char*) NULL);
+                 os::shell_const::name(),
+                 os::shell_const::arg0(),
+                 os::shell_const::arg1(),
+                 task.command().value().c_str(),
+                 (char*) NULL);
         } else {
           execvp(task.command().value().c_str(), argv);
         }
