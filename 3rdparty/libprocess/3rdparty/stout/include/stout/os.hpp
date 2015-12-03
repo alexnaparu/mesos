@@ -24,23 +24,30 @@
 #define NAME_MAX MAXNAMLEN
 #endif // NAME_MAX
 #else
+#ifndef __WINDOWS__
 #include <fts.h>
+#endif // __WINDOWS__
 #endif // __sun
 #include <fcntl.h>
+#ifndef __WINDOWS__
 #include <glob.h>
 #include <grp.h>
-#ifdef __WINDOWS__
+#else
 #include <io.h>
-#endif // __WINDOWS__
+#endif //__WINDOWS__
 #include <limits.h>
+#ifndef __WINDOWS__
 #include <netdb.h>
 #include <pwd.h>
+#endif // __WINDOWS__
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef __WINDOWS__
 #include <unistd.h>
 #include <utime.h>
+#endif // __WINDOWS__
 
 #include <glog/logging.h>
 
@@ -55,8 +62,11 @@
 #ifdef __WINDOWS__
 #include <sys/utime.h>
 #endif // __WINDOWS
+#ifndef __WINDOWS__
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#endif // __WINDOWS__
+
 
 #include <list>
 #include <queue>
@@ -88,6 +98,7 @@
 #include <stout/os/mkdtemp.hpp>
 #include <stout/os/os.hpp>
 #include <stout/os/permissions.hpp>
+#include <stout/os/process.hpp>
 #include <stout/os/read.hpp>
 #include <stout/os/realpath.hpp>
 #include <stout/os/rename.hpp>
