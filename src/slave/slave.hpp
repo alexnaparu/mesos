@@ -52,7 +52,7 @@
 #include <stout/hashmap.hpp>
 #include <stout/hashset.hpp>
 #include <stout/option.hpp>
-#include <stout/os.hpp>
+//#include <stout/os.hpp>
 #include <stout/path.hpp>
 #include <stout/recordio.hpp>
 #include <stout/uuid.hpp>
@@ -76,6 +76,12 @@
 #include "slave/monitor.hpp"
 #include "slave/paths.hpp"
 #include "slave/state.hpp"
+
+// "REGISTERING" is used as an enum value, but it's actually defined as a
+// constant in the Windows SDK
+#ifdef __WINDOWS__
+#undef REGISTERING
+#endif // __WINDOWS__
 
 namespace mesos {
 namespace internal {

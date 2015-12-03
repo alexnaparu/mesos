@@ -170,6 +170,7 @@ set(SCHEDULER_SRC
 set(AGENT_SRC
   ${AGENT_SRC}
   slave/constants.cpp
+  slave/metrics.cpp
   slave/paths.cpp
   slave/state.cpp
   )
