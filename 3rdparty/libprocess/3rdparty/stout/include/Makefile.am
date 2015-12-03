@@ -57,6 +57,7 @@ nobase_include_HEADERS =		\
   stout/os/bootid.hpp			\
   stout/os/chdir.hpp			\
   stout/os/chown.hpp			\
+  stout/os/chroot.hpp      		\
   stout/os/close.hpp			\
   stout/os/constants.hpp		\
   stout/os/environment.hpp		\
@@ -93,7 +94,8 @@ nobase_include_HEADERS =		\
   stout/os/utime.hpp			\
   stout/os/write.hpp			\
   stout/os/posix/bootid.hpp		\
-  stout/os/posix/chown.hpp    \
+  stout/os/posix/chown.hpp    		\
+  stout/os/posix/chroot.hpp   		\
   stout/os/posix/exists.hpp		\
   stout/os/posix/fcntl.hpp		\
   stout/os/posix/fork.hpp		\
@@ -112,6 +114,7 @@ nobase_include_HEADERS =		\
   stout/os/raw/environment.hpp		\
   stout/os/windows/bootid.hpp		\
   stout/os/windows/chown.hpp    \
+  stout/os/windows/chroot.hpp   \
   stout/os/windows/exists.hpp		\
   stout/os/windows/fcntl.hpp		\
   stout/os/windows/fork.hpp		\
