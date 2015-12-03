@@ -49,6 +49,7 @@ nobase_include_HEADERS =		\
   process/once.hpp			\
   process/owned.hpp			\
   process/pid.hpp			\
+  process/posix/future.hpp			\
   process/process.hpp			\
   process/profiler.hpp			\
   process/protobuf.hpp			\
@@ -66,4 +67,5 @@ nobase_include_HEADERS =		\
   process/time.hpp			\
   process/timeout.hpp			\
   process/timer.hpp			\
-  process/timeseries.hpp
+  process/timeseries.hpp			\
+  process/windows/future.hpp

@@ -35,6 +35,12 @@
 #include <process/pid.hpp>
 #include <process/timer.hpp>
 
+#ifdef __WINDOWS__
+#include <process/windows/future.hpp>
+#else
+#include <process/posix/future.hpp>
+#endif // __WINDOWS__
+
 #include <stout/abort.hpp>
 #include <stout/check.hpp>
 #include <stout/duration.hpp>
@@ -176,7 +182,13 @@ public:
   template <typename F>
   const Future<T>& onDiscard(_Deferred<F>&& deferred) const
   {
-    return onDiscard(std::function<void()>(deferred));
+    // VS 2015 won't support C++14 std::function SFINAE until Update 2, so
+    // converting _Deferred to std::function must be done by explicitly
+    // calling _Deferred's conversion function.
+    // TODO(hausdorff) Update this after Update 2, tracked by MESOS-3993
+
+    typedef std::function<void()> functionType;
+    return onDiscard(deferred.operator functionType());
   }
 
   template <typename F>
@@ -224,7 +236,9 @@ private:
         }));
   }
 
-  template <typename F, typename = typename std::result_of<F()>::type>
+  // Platform dependent template arguments in the macro are equivalent to:
+  // template <typename F, typename = typename std::result_of<F()>::type>
+  PROCESS_FUTURE_ONREADY_F_LESSPREFER_TEMPLATE
   const Future<T>& onReady(F&& f, LessPrefer) const
   {
     return onReady(std::function<void(const T&)>(
@@ -242,7 +256,9 @@ private:
         }));
   }
 
-  template <typename F, typename = typename std::result_of<F()>::type>
+  // Platform dependent template arguments in the macro are equivalent to:
+  // template <typename F, typename = typename std::result_of<F()>::type>
+  PROCESS_FUTURE_ONFAILED_F_LESSPREFER_TEMPLATE
   const Future<T>& onFailed(F&& f, LessPrefer) const
   {
     return onFailed(std::function<void(const std::string&)>(
@@ -260,7 +276,9 @@ private:
         }));
   }
 
-  template <typename F, typename = typename std::result_of<F()>::type>
+  // Platform dependent template arguments in the macro are equivalent to:
+  // template <typename F, typename = typename std::result_of<F()>::type>
+  PROCESS_FUTURE_ONANY_F_LESSPREFER_TEMPLATE
   const Future<T>& onAny(F&& f, LessPrefer) const
   {
     return onAny(std::function<void(const Future<T>&)>(
@@ -328,27 +346,42 @@ public:
   }
 
 private:
-  template <typename F, typename X = typename internal::unwrap<typename std::result_of<F(const T&)>::type>::type> // NOLINT(whitespace/line_length)
+  // Platform dependent template arguments in the macro are equivalent to:
+  // template <typename F, typename X = typename internal::unwrap<typename std::result_of<F(const T&)>::type>::type> // NOLINT(whitespace/line_length)
+  PROCESS_FUTURE_THEN_DEFERRED_PREFER_TEMPLATE
   Future<X> then(_Deferred<F>&& f, Prefer) const
   {
     // note the then<X> is necessary to not have an infinite loop with
     // then(F&& f)
-    return then<X>(std::function<Future<X>(const T&)>(f));
+
+    // VS 2015 won't support C++14 std::function SFINAE until Update 2, so
+    // converting _Deferred to std::function must be done by explicitly
+    // calling _Deferred's conversion function.
+    // TODO(hausdorff) Update this after Update 2, tracked by MESOS-3993
+
+    typedef std::function<Future<X>(const T&)> functionType;
+    return then<X>(f.operator functionType());
   }
 
-  template <typename F, typename X = typename internal::unwrap<typename std::result_of<F()>::type>::type> // NOLINT(whitespace/line_length)
+  // Platform dependent template arguments in the macro are equivalent to:
+  // template <typename F, typename X = typename internal::unwrap<typename std::result_of<F()>::type>::type> // NOLINT(whitespace/line_length)
+  PROCESS_FUTURE_THEN_DEFERRED_LESSPREFER_TEMPLATE
   Future<X> then(_Deferred<F>&& f, LessPrefer) const
   {
     return then<X>(std::function<Future<X>()>(f));
   }
 
-  template <typename F, typename X = typename internal::unwrap<typename std::result_of<F(const T&)>::type>::type> // NOLINT(whitespace/line_length)
+  // Platform dependent template arguments in the macro are equivalent to:
+  // template <typename F, typename X = typename internal::unwrap<typename std::result_of<F()>::type>::type> // NOLINT(whitespace/line_length)
+  PROCESS_FUTURE_THEN_F_PREFER_TEMPLATE
   Future<X> then(F&& f, Prefer) const
   {
     return then<X>(std::function<Future<X>(const T&)>(f));
   }
 
-  template <typename F, typename X = typename internal::unwrap<typename std::result_of<F()>::type>::type> // NOLINT(whitespace/line_length)
+  // Platform dependent template arguments in the macro are equivalent to:
+  // template <typename F, typename X = typename internal::unwrap<typename std::result_of<F()>::type>::type> // NOLINT(whitespace/line_length)
+  PROCESS_FUTURE_THEN_F_LESSPREFER_TEMPLATE
   Future<X> then(F&& f, LessPrefer) const
   {
     return then<X>(std::function<Future<X>()>(f));
