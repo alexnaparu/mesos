@@ -25,11 +25,12 @@ namespace os {
 // implementation of sendfile:
 //   1. s must be a stream oriented socket descriptor.
 //   2. fd must be a regular file descriptor.
+/*
 inline ssize_t sendfile(int s, int fd, off_t offset, size_t length)
 {
   UNIMPLEMENTED;
 }
-
+*/
 } // namespace os {
 
 #endif // __STOUT_OS_WINDOWS_SENDFILE_HPP__
