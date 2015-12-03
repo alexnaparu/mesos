@@ -91,6 +91,7 @@
 #include <stout/os/raw/environment.hpp>
 
 #include <stout/os/shell.hpp>
+#include <stout/os/chroot.hpp>
 
 namespace os {
 
@@ -139,16 +140,6 @@ inline int execvpe(const char* file, char** argv, char** envp)
 inline Try<Nothing> chmod(const std::string& path, int mode)
 {
   if (::chmod(path.c_str(), mode) < 0) {
-    return ErrnoError();
-  }
-
-  return Nothing();
-}
-
-
-inline Try<Nothing> chroot(const std::string& directory)
-{
-  if (::chroot(directory.c_str()) < 0) {
     return ErrnoError();
   }
 
