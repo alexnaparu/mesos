@@ -89,6 +89,7 @@ nobase_include_HEADERS =		\
   stout/os/signals.hpp			\
   stout/os/stat.hpp			\
   stout/os/strerror.hpp			\
+  stout/os/su.hpp			\
   stout/os/sysctl.hpp			\
   stout/os/touch.hpp			\
   stout/os/utime.hpp			\
@@ -111,6 +112,7 @@ nobase_include_HEADERS =		\
   stout/os/posix/shell.hpp		\
   stout/os/posix/signals.hpp		\
   stout/os/posix/stat.hpp		\
+  stout/os/posix/su.hpp		\
   stout/os/raw/environment.hpp		\
   stout/os/windows/bootid.hpp		\
   stout/os/windows/chown.hpp    \
@@ -130,6 +132,7 @@ nobase_include_HEADERS =		\
   stout/os/windows/shell.hpp		\
   stout/os/windows/signals.hpp		\
   stout/os/windows/stat.hpp		\
+  stout/os/windows/su.hpp		\
   stout/path.hpp			\
   stout/preprocessor.hpp		\
   stout/proc.hpp			\
