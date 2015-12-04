@@ -21,6 +21,7 @@
 #include <iostream>
 #include <list>
 
+#include <stout/fs.hpp>
 #include <stout/option.hpp>
 #include <stout/os.hpp>
 #include <stout/path.hpp>
