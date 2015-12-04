@@ -52,7 +52,7 @@
 #include <stout/hashmap.hpp>
 #include <stout/hashset.hpp>
 #include <stout/option.hpp>
-//#include <stout/os.hpp>
+#include <stout/os.hpp>
 #include <stout/path.hpp>
 #include <stout/recordio.hpp>
 #include <stout/uuid.hpp>
