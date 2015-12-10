@@ -85,6 +85,9 @@ public:
   Result(const ErrnoError& error)
     : data(error) {}
 
+  Result(const WindowsError& error)
+    : data(error) {}
+
   // We don't need to implement these because we are leveraging
   // Try<Option<T>>.
   Result(const Result<T>& that) = default;
