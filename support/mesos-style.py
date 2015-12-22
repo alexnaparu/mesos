@@ -177,20 +177,5 @@ if __name__ == '__main__':
                             format(num_errors=total_errors))
         sys.exit(total_errors)
     else:
-        # File paths specified, run lint on all file paths that are candidates.
-        # NOTE: Convert to absolute path to normalize path separators, which
-        # differ by OS.
-        file_paths = map(os.path.abspath, sys.argv[1:])
-
-        # Compute the set intersect of the input file paths and candidates.
-        # This represents the reduced set of candidates to run lint on.
-        candidates_set = set(candidates)
-        clean_file_paths_set = set(map(lambda x: x.rstrip(), file_paths))
-        filtered_candidates_set = clean_file_paths_set.intersection(
-            candidates_set)
-
-        if filtered_candidates_set:
-            sys.exit(run_lint(list(filtered_candidates_set)))
-        else:
-            print "No files to lint\n"
-            sys.exit(0)
+        print "No files to lint\n"
+        sys.exit(0)
