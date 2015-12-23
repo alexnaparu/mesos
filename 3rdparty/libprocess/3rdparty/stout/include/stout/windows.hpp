@@ -27,6 +27,14 @@
 #include <Winsock2.h>
 #include <Windows.h>
 
+#include <memory>
+
+
+// An RAII `HANDLE`. `HANDLE` itself is a `void*` under the covers, this type
+// is convenient because it is much more readable to return `shared_handle`
+// from a function than it does to return `shared_ptr<void>`.
+typedef std::shared_ptr<void> shared_handle;
+
 
 // Definitions and constants used for Windows compat.
 //
@@ -137,14 +145,44 @@ typedef SSIZE_T ssize_t;
 // have to change any socket code.
 constexpr int SHUT_RD = SD_RECEIVE;
 
-// Macros that test whether a `stat` struct represents a directory or a file.
-#define S_ISDIR(mode)  (((mode) & S_IFMT) == S_IFDIR)  // Directory.
-#define S_ISREG(mode)  (((mode) & S_IFMT) == S_IFREG)  // File.
-#define S_ISCHR(mode)  (((mode) & S_IFMT) == S_IFCHR)  // Character device.
-#define S_ISFIFO(mode) (((mode) & S_IFMT) == _S_IFIFO) // Pipe.
-#define S_ISBLK(mode)  0                               // Block special device.
-#define S_ISSOCK(mode) 0                               // Socket.
-#define S_ISLNK(mode)  0                               // Symbolic link.
+// The following functions are usually macros on POSIX; we provide them here as
+// functions to avoid having global macros lying around. Note that these
+// operate on the `_stat` struct (a Windows version of the standard POSIX
+// `stat` struct), of which the `st_mode` field is known to be an `int`.
+inline bool S_ISDIR(const int mode)
+{
+  return (((mode) & S_IFMT) == S_IFDIR); // Directory.
+}
+
+inline int S_ISREG(const int mode)
+{
+  return (((mode)& S_IFMT) == S_IFREG);  // File.
+}
+
+inline int S_ISCHR(const int mode)
+{
+  return (((mode)& S_IFMT) == S_IFCHR);  // Character device.
+}
+
+inline int S_ISFIFO(const int mode)
+{
+  return (((mode)& S_IFMT) == _S_IFIFO); // Pipe.
+}
+
+inline int S_ISBLK(const int mode)
+{
+  return 0;                              // Block special device.
+}
+
+inline int S_ISSOCK(const int mode)
+{
+  return 0;                              // Socket.
+}
+
+inline int S_ISLNK(const int mode)
+{
+  return 0;                              // Symbolic link.
+}
 
 // Permissions API. (cf. MESOS-3176 to track ongoing permissions work.)
 //
