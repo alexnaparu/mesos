@@ -15,11 +15,12 @@
 
 #include <stdarg.h> // For va_list, va_start, etc.
 
+#include <process.h>
+
 #include <ostream>
 #include <string>
 
 #include <stout/try.hpp>
-
 
 namespace os {
 
@@ -30,6 +31,35 @@ template <typename... T>
 Try<std::string> shell(const std::string& fmt, const T&... t)
 {
   UNIMPLEMENTED;
+}
+
+// Canonical constants used as platform-dependent args to `exec` calls.
+// name() is the command name, arg0() is the first argument received
+// by the callee, usualy the command name and arg1() is the second
+// command argument received by the callee.
+struct shell_const
+{
+  static const char* name()
+  {
+    return "cmd.exe";
+  }
+  static const char* arg0()
+  {
+    return "cmd.exe";
+  }
+  static const char* arg1()
+  {
+    return "/c";
+  }
+};
+
+// Executes a command by calling "cmd /c <command>", and returns
+// after the command has been completed. Returns 0 if succeeds, and
+// return -1 on error
+inline int system(const std::string& command)
+{
+    return ::_spawnl(_P_WAIT, shell_const::name(), shell_const::arg0(),
+                      shell_const::arg1(), command.c_str());
 }
 
 } // namespace os {

@@ -374,5 +374,14 @@ decltype(_access(fileName, accessMode))
   return _access(fileName, accessMode);
 }
 
+// os::sytem returns -1 if the processor cannot be started
+// therefore any return valu indicates the process has been started
+#ifndef WIFEXITED
+  #define WIFEXITED(x) ((x) != -1)
+#endif //WIFWXITED
+#ifndef WEXITSTATUS
+  #define WEXITSTATUS(x) (x)
+#endif
+
 
 #endif // __STOUT_WINDOWS_HPP__
