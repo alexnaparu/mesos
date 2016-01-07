@@ -47,15 +47,8 @@
 #endif
 #endif /* __linux__ */
 
-#ifdef __FreeBSD__
-#ifndef SOL_TCP
-#define SOL_TCP IPPROTO_TCP
-#endif
-#endif /* __FreeBSD__ */
-
-#ifdef __WINDOWS__
 #ifdef _WINDOWS_
-typedef int socklen_t
+typedef int socklen_t;
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
