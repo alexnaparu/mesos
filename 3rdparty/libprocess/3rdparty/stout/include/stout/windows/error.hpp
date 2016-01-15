@@ -30,14 +30,13 @@ public:
   WindowsError(const DWORD error = ERROR_SUCCESS)
     : Error(GetLastErrorAsString(error)) {}
 
-  WindowsError(const std::string& message, const DWORD error = ERROR_SUCCESS)
-    : Error(message + ": " + GetLastErrorAsString(error)) {}
+  // Inherit all constructors from the base class.
+  using Error::Error;
 
 private:
   static std::string GetLastErrorAsString(const DWORD error)
   {
     DWORD errorCode = (error == ERROR_SUCCESS) ? ::GetLastError() : error;
-
 
     // Default if no error.
     if (errorCode == 0) {

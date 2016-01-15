@@ -35,9 +35,22 @@
 class Error
 {
 public:
-  explicit Error(const std::string& _message) : message(_message) {}
+  template<typename... T> Error(const std::string& format, T&&... args) {
+    // Determine how many characters are needed to store the expanded
+    // string.
+    const int size = ::snprintf(NULL, 0, format.c_str(), args...);
+    if (size > 0) {
+      // Allocate sufficient space for the expanded string.
+      message.reserve(size);
+      ::snprintf((char *)message.data(), size + 1, format.c_str(), args...);
+    }
+    else {
+      message.assign(
+          "`Error::Error()` - incorrect string format '" + format + "'");
+      }
+  }
 
-  const std::string message;
+  std::string message;
 };
 
 
@@ -49,5 +62,23 @@ public:
   ErrnoError(const std::string& message)
     : Error(message + ": " + os::strerror(errno)) {}
 };
+
+// Creates a formatted error message prefixed with the calling function's name
+// (e.g. "`foo`: ...").
+// The _TYPE argument specifies the error class to be used. Subsequent
+// arguments determine the format of the error message (printf-style).
+//
+// Example:
+//
+// Try<Nothing> bar() {
+//   return _ERROR(WindowsError, "Could not open file '%s', error code %d", \
+          "file1.txt", -1);
+// }
+//
+// will generate an error with the message:
+//
+// `bar`: Could not open file 'file1.txt', error code -1
+#define _ERROR(_TYPE, _FORMAT, ...) \
+  _TYPE("`%s`: "_FORMAT, __func__, __VA_ARGS__)
 
 #endif // __STOUT_ERROR_BASE_HPP__
