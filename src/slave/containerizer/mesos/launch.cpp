@@ -265,7 +265,8 @@ int MesosContainerizerLaunch::execute()
   if (command.get().shell()) {
     // Execute the command using shell.
     execlp(os::shell_const::name(), os::shell_const::arg0(),
-           os::shell_const::arg1(), command.get().value().c_str(), (char*) NULL);
+               os::shell_const::arg1(),
+               command.get().value().c_str(), (char*) NULL);
   } else {
     // Use execvp to launch the command.
     char** argv = new char*[command.get().arguments().size() + 1];
