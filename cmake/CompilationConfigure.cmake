@@ -73,6 +73,7 @@ endif (WIN32)
 # the clearest and most stable way of accomplishing this.
 if (WIN32)
   add_definitions(-D__WINDOWS__)
+  add_definitions(-DHAVE_LIBZ)
 endif (WIN32)
 
 
