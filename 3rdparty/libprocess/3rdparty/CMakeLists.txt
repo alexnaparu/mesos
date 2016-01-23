@@ -54,8 +54,9 @@ if (WIN32)
   #
   # [1] https://github.com/google/glog/pull/43
   set(GLOG_URL     https://github.com/google/glog/tarball/4d391fe692ae6b9e0105f473945c415a3ce5a401)
-  set(CURL_URL     ${UPSTREAM_URL}/curl-static-${CURL_VERSION}.tar.gz)
-  set(LIBAPR_URL   ${UPSTREAM_URL}/libapr-${LIBAPR_VERSION}.tar.gz)
+  set(CURL_URL   ${UPSTREAM_URL}/curl-static-${CURL_VERSION}.tar.gz)
+  set(LIBAPR_URL ${UPSTREAM_URL}/libapr-${LIBAPR_VERSION}.tar.gz)
+  set(ZLIB_URL   ${UPSTREAM_URL}/zlib-${ZLIB_VERSION}.tar.gz)
 endif (WIN32)
 
 # Define build/patch/configure commands for third-party libs.
@@ -202,6 +203,13 @@ if (WIN32)
     BUILD_COMMAND     ${CMAKE_NOOP}
     INSTALL_COMMAND   ${CMAKE_NOOP}
     URL               ${CURL_URL}
+  )
+
+  ExternalProject_Add(
+    ${ZLIB_TARGET}
+    PREFIX          ${ZLIB_CMAKE_ROOT}
+    INSTALL_COMMAND ${CMAKE_NOOP}
+    URL             ${ZLIB_URL}
   )
 endif (WIN32)
 
