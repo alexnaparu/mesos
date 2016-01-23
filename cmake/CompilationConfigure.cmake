@@ -16,6 +16,8 @@
 
 # CONFIGURE COMPILATION.
 ########################
+option(BUILD_SHARED_LIBS "Build shared libraries (DLLs)." ON)
+
 string(COMPARE EQUAL ${CMAKE_SYSTEM_NAME} "Linux" LINUX)
 
 if (_DEBUG)
@@ -52,8 +54,17 @@ if (WIN32)
       "Please use MSVC 1900 (included with Visual Studio 2015 or later).")
   endif (${MSVC_VERSION} LESS 1900)
 
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+  if (BUILD_SHARED_LIBS)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".dll")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD")
+  else (BUILD_SHARED_LIBS)
+    # Some of our dependencies, like glog, will require some more hours to get
+    # static builds to work correctly on Windows.
+    message(
+      FATAL_ERROR
+      "Windows builds do not currently support building static libraries.")
+  endif (BUILD_SHARED_LIBS)
 elseif (COMPILER_SUPPORTS_CXX11)
   # Finally, on non-Windows platforms, we must check that the current compiler
   # supports C++11.
