@@ -21,6 +21,7 @@
 #include <process/process.hpp>
 
 #include <stout/lambda.hpp>
+#include <stout/result_of.hpp>
 #include <stout/nothing.hpp>
 #include <stout/preprocessor.hpp>
 
@@ -235,7 +236,7 @@ Future<typename lambda::result_of<F(void)>::type> async(
 template <typename F>
 Future<Nothing> async(
     const F& f,
-    typename boost::enable_if<boost::is_void<typename lambda::result_of<F(void)>::type> >::type*) // NOLINT(whitespace/line_length)
+    typename boost::enable_if<boost::is_void<typename result_of<F(void)>::type> >::type*) // NOLINT(whitespace/line_length)
 {
   return AsyncExecutor().execute(f);
 }
