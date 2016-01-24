@@ -149,6 +149,7 @@ if (WIN32)
     ${PROCESS_LIBS}
     ${CURL_LFLAG}
     ${ZLIB_LFLAG}
+    ws2_32
     )
 elseif (NOT WIN32)
   find_package(ZLIB REQUIRED)
