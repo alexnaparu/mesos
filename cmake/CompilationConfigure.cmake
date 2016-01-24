@@ -68,6 +68,10 @@ if (WIN32)
       "Please use MSVC 1900 (included with Visual Studio 2015 or later).")
   endif (${MSVC_VERSION} LESS 1900)
 
+  # COFF/PE and friends are somewhat limited in the number of sections they
+  # allow for an object file. We use this to avoid those problems.
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
+
   if (BUILD_SHARED_LIBS)
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".dll")
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
