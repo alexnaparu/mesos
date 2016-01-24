@@ -149,5 +149,6 @@ if (NOT WIN32)
   set(PROCESS_LIBS
     ${PROCESS_LIBS}
     ${ZLIB_LIBRARIES}
+    ws2_32
     )
 endif (NOT WIN32)
