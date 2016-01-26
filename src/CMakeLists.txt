@@ -343,7 +343,7 @@ link_directories(${AGENT_LIB_DIRS})
 
 # THE MESOS LIBRARY (generates, e.g., libmesos.so, etc., on Linux).
 ###################################################################
-add_library(${MESOS_TARGET} ${MESOS_SRC})
+add_library(${MESOS_TARGET} STATIC ${MESOS_SRC})
 set_target_properties(
   ${MESOS_TARGET} PROPERTIES
   VERSION ${MESOS_PACKAGE_VERSION}
@@ -353,4 +353,6 @@ add_dependencies(${MESOS_TARGET} ${AGENT_DEPENDENCIES})
 
 # ADD LINKER FLAGS (generates, e.g., -lglog on Linux).
 ######################################################
-target_link_libraries(${MESOS_TARGET} ${AGENT_LIBS})
+#target_link_libraries(${MESOS_TARGET} ${AGENT_LIBS})
+
+add_subdirectory(slave)
