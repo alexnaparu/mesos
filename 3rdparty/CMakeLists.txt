@@ -31,6 +31,11 @@ else (REBUNDLED)
   set(ZOOKEEPER_URL ${UPSTREAM_URL}/zookeeper-${ZOOKEEPER_VERSION}.tar.gz)
 endif (REBUNDLED)
 
+if (WIN32)
+  set(ZOOKEEPER_URL ${UPSTREAM_URL}/zookeeper-${ZOOKEEPER_VERSION}.tar.gz)
+endif (WIN32)
+
+
 # Define build/patch/configure commands for third-party libs.
 #############################################################
 if (NOT WIN32)
