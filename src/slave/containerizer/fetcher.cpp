@@ -278,6 +278,8 @@ static Try<Bytes> fetchSize(
     return size.get();
   }
 
+  //TODO: Hadoop HDFS size info is missing for now
+  /*
   Try<Owned<HDFS>> hdfs = HDFS::create();
   if (hdfs.isError()) {
     return Error("Failed to create HDFS client: " + hdfs.error());
@@ -292,6 +294,8 @@ static Try<Bytes> fetchSize(
   }
 
   return size.get();
+  */
+  return 0;
 }
 
 
