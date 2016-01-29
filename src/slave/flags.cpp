@@ -27,8 +27,7 @@
 
 #include "slave/constants.hpp"
 
-
-mesos::internal::slave::Flags::Flags()
+void mesos::internal::slave::Flags::initialize()
 {
   add(&Flags::hostname,
       "hostname",
