@@ -1,4 +1,4 @@
-set(BOOST_VERSION       "1.53.0")
+set(BOOST_VERSION       "1.55.0")
 set(CURL_VERSION        "7.43.0")
 set(GLOG_VERSION        "0.3.3")
 set(GMOCK_VERSION       "1.7.0")
