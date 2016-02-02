@@ -65,7 +65,7 @@ def execute(command, ignore_errors=False):
         return None
     return data
 
-def user_skipped_review_win32():
+def user_skipped_review_win32(sha1, sha2):
     """Prints prompt asking whether to skip or post a reveiew, reports result.
 
     The can respond to the prompt with: a 'y', indicating we want to post the
@@ -95,6 +95,16 @@ def user_skipped_review_win32():
     Returns:
         `True` if user asked to skip review, `False` otherwise.
     """
+
+    print "\nSkip commit: '{}'".format(sha2)
+    # Disregard user input if a commit hash was specified.
+    if sha1 != None and sha2 != None:
+        if sha1.lower() == sha2.lower() or sha1[:7].lower() == sha2[:7].lower():
+            # Hashes match, this is the one.
+            return False
+        else:
+            return True
+
     import msvcrt
     ctrl_d = chr(4)
 
@@ -116,7 +126,7 @@ def user_skipped_review_win32():
     else:
         return True
 
-def user_skipped_review_unix():
+def user_skipped_review_unix(sha1, sha2):
     """Prints prompt asking whether to skip or post a reveiew, reports result.
 
     The can respond to the prompt with: a '<RET>', indicating we want to post
@@ -212,6 +222,7 @@ top_level_dir = execute(['git', 'rev-parse', '--show-toplevel']).strip()
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--server')
 parser.add_argument('--tracking-branch')
+parser.add_argument('--commit-hash')
 args, _ = parser.parse_known_args()
 
 # Try to read the .reviewboardrc in the top-level directory.
@@ -293,6 +304,12 @@ for i in range(len(shas)):
 
     review_request_id = None
 
+    # Post review for a specific commit, if a hash was specified
+    review_commit_hash = None
+    if args.commit_hash is not None:
+        review_commit_hash = args.commit_hash
+        print "\nReviewing commit: '{}'".format(review_commit_hash)
+
     pos = message.find('Review:')
     if pos != -1:
         # NOTE: Strip the trailing '/' off the URL so we don't generate a
@@ -340,7 +357,7 @@ for i in range(len(shas)):
         print '\n... with parent diff created from:'
         print output
 
-    if user_skipped_review():
+    if user_skipped_review(review_commit_hash, sha):
         i = i + 1
         previous = sha
         parent_review_request_id = review_request_id
@@ -375,7 +392,14 @@ for i in range(len(shas)):
          command = command + ['--depends-on=' + parent_review_request_id]
 
        # rbt >= 0.6 revisions are passed in as args.
-       command = command + sys.argv[1:] + [previous, sha]
+       command = command + sys.argv[1:]
+
+       #remove --commit-hash and hash value if specified
+       if review_commit_hash is not None:
+           command.remove('--commit-hash')
+           command.remove(review_commit_hash)
+
+       command = command + [previous, sha]
     else:
         # post-review and rbt < 0.6 revisions are passed in using the revision
         # range option.
