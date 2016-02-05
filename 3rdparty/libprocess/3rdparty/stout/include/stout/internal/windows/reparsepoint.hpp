@@ -263,6 +263,82 @@ inline Try<SymbolicLink> get_symbolic_link_data(const HANDLE handle)
 }
 
 
+// Adjusts the process token privilege set so that the privilege specified by
+// `privilege_name` is either granted (if `revoke_privilege` is `false`) or
+// revoked (if `revoke_privilege` is `true`). The `privilege_held` parameter is
+// populated by querying the token for the specified privilege before any
+// privileges are granted or removed. This is useful in scenarios where we want
+// to restore the original token privileges.
+inline Try<Nothing> adjust_token_privileges(
+  LPCSTR privilege_name,
+  bool revoke_privilege,
+  bool& privilege_held)
+{
+  HANDLE process_token;
+
+  // Open a token to the current process
+  if (!::OpenProcessToken(
+      ::GetCurrentProcess(),
+      TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+      &process_token)
+      ) {
+    return WindowsError("internal::windows::adjust_token_privileges: "
+        "OpenProcessToken call failed");
+  }
+
+  SharedHandle safe_token(process_token, ::CloseHandle);
+
+  // Find specified privilege by string name
+  LUID privilege_luid;
+  if (!::LookupPrivilegeValue(NULL,
+      privilege_name,
+      &privilege_luid)) {
+      return WindowsError("internal::windows::adjust_token_privileges "
+          "LookupPrivilegeValue call failed");
+  }
+
+  // Check whether the privilege is already held
+  PRIVILEGE_SET privileges;
+  privileges.PrivilegeCount = 1;
+  privileges.Control = PRIVILEGE_SET_ALL_NECESSARY;
+  privileges.Privilege[0].Luid = privilege_luid;
+  privileges.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+  BOOL privilege_enabled;
+  if (!::PrivilegeCheck(safe_token.get(), &privileges, &privilege_enabled))
+  {
+    return WindowsError("internal::windows::adjust_token_privileges: "
+        "PrivilegeCheck call failed");
+  }
+
+  privilege_held = privilege_enabled;
+
+  if ((!revoke_privilege && !privilege_held) ||
+      (revoke_privilege && privilege_held))
+  {
+    // Adjust privileges for current token as needed
+    TOKEN_PRIVILEGES token_privileges;
+    token_privileges.PrivilegeCount = 1;
+    token_privileges.Privileges[0].Attributes =
+        (revoke_privilege ? SE_PRIVILEGE_REMOVED : SE_PRIVILEGE_ENABLED);
+    token_privileges.Privileges[0].Luid = privilege_luid;
+
+    if (!::AdjustTokenPrivileges(
+        safe_token.get(),
+        FALSE,
+        &token_privileges,
+        sizeof(TOKEN_PRIVILEGES),
+        NULL,
+        NULL)
+        ) {
+      return WindowsError("internal::windows::adjust_token_privileges: "
+          "AdjustTokenPrivileges call failed");
+    }
+  }
+
+  return Nothing();
+}
+
 // Creates a reparse point with the specified target. The target can be either
 // a file (in which case a junction is created), or a folder (in which case a
 // mount point is created).
@@ -319,21 +395,59 @@ inline Try<Nothing> create_symbolic_link(
         "Path '" + absolute_target_path + "' is already a reparse point");
   }
 
-  // `CreateSymbolicLink` adjusts the process token's privileges to allow for
-  // symlink creation. MSDN[1] makes no guarantee when it comes to the thread
-  // safety of this operation, so we are making use of a mutex to prevent
-  // multiple concurrent calls.
+  // A successful call to `CreateSymbolicLink` requires the process token to
+  // have the `SeBackupPrivilege` privilege. If the process is being run under
+  // elevation, then the process token should already be privileged. When the
+  // process runs under a non-administrator user, this privilege is only present
+  // if the local security policy allows it:
   //
-  // [1] https://msdn.microsoft.com/en-us/library/windows/desktop/aa363866(v=vs.85).aspx
+  // `gpedit.msc` -> `Local Computer Policy` -> `Computer Configuration` ->
+  // `Windows Settings` -> `Security Settings` -> `User Rights Assignment` ->
+  // `Create Symbolic Links`.
+  //
+  // Whenever the process is run under the context of a user that is a member
+  // of `Administrators`, Windows will strip the `SeBackupPrivilege`, but will
+  // allow it to be added back. This behavior is documented in MSDN[1]
+  //
+  // We are making use of a mutex here to prevent multiple concurrent calls from
+  // changing the token privileges before `CreateSymbolicLink` is called. See
+  // MSDN[2] for details on `CreateSymbolicLink` arguments.
+  //
+  // [1] https://msdn.microsoft.com/en-us/library/bb530410.aspx
+  // [2] https://msdn.microsoft.com/en-us/library/windows/desktop/aa363866(v=vs.85).aspx
   static std::mutex adjust_privileges_mutex;
   synchronized(adjust_privileges_mutex) {
+
+    // Remember whether we had symlink creation privileges.
+    bool privilege_held = false;
+    Try<Nothing> result = adjust_token_privileges(
+      SE_CREATE_SYMBOLIC_LINK_NAME,        // Symlink creation privilege.
+          false,                  // Grant, don't revoke.
+          privilege_held);        // Save for cleanup.
+
+    if (result.isError()) {
+      return Error("Could not grant symlink creation privileges: " +
+          result.isError());
+    }
+
     if (!::CreateSymbolicLink(
         reparse_point.c_str(),  // path to the symbolic link
-        target.c_str(),        // symlink target
+        target.c_str(),         // symlink target
         target_is_folder ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0)) {
+
+      // Restore original token privileges.
+      if (!privilege_held) {
+        adjust_token_privileges(SE_CREATE_SYMBOLIC_LINK_NAME, true, privilege_held);
+      }
+
       return WindowsError(
           "'internal::windows::create_symbolic_link': 'CreateSymbolicLink' "
           "call failed");
+    }
+
+    // Restore original token privileges.
+    if (!privilege_held) {
+      adjust_token_privileges(SE_CREATE_SYMBOLIC_LINK_NAME, true, privilege_held);
     }
   }
 
