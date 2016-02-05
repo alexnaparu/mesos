@@ -339,7 +339,7 @@ void Slave::initialize()
   CHECK_SOME(os::mkdir(flags.work_dir))
     << "Failed to create slave work directory '" << flags.work_dir << "'";
 
-  Try<Resources> resources = Resources(); // Containerizer::resources(flags);
+  Try<Resources> resources = Containerizer::resources(flags);
   if (resources.isError()) {
     EXIT(1) << "Failed to determine slave resources: " << resources.error();
   }

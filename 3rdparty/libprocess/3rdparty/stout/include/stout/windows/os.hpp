@@ -35,6 +35,9 @@
 #include <stout/os/os.hpp>
 #include <stout/os/config.hpp>
 
+#include <TlHelp32.h>
+#include <Psapi.h>
+
 #define WNOHANG 0
 #define hstrerror() ("")
 #define SIGPIPE 100
@@ -461,40 +464,137 @@ decltype(_access(fileName.c_str(), accessMode))
   return _access(fileName.c_str(), accessMode);
 }
 
+inline double CalculateProcessCPUTime(const long cpu_ticks, const SYSTEMTIME& time)
+{
+  return
+    ((double)time.wHour * 3600.0 +
+      (double)time.wMinute * 60.0 +
+      (double)time.wSecond +
+      (double)time.wMilliseconds / 1000.0) / cpu_ticks;
+}
+
+inline bool GetProcessCPUTime(HANDLE process_handle, double& usertime, double& systemtime)
+{
+  FILETIME create_filetime;
+  FILETIME exit_filetime;
+  FILETIME kernel_filetime;
+  FILETIME user_filetime;
+
+  long ticks = 0;
+  QueryPerformanceFrequency((LARGE_INTEGER*)&ticks);
+  if (ticks <= 0) {
+    return false;
+  }
+
+  bool result = GetProcessTimes(
+    process_handle,
+    &create_filetime,
+    &exit_filetime,
+    &kernel_filetime,
+    &user_filetime);
+  if (!result) {
+    return false;
+  }
+
+  SYSTEMTIME user_system_time;
+  result = FileTimeToSystemTime(&user_filetime, &user_system_time);
+  if (!result) {
+    usertime = CalculateProcessCPUTime(ticks, user_system_time);
+  }
+
+  SYSTEMTIME kernel_system_time;
+  result = FileTimeToSystemTime(&kernel_filetime, &kernel_system_time);
+  if (!result) {
+    systemtime = CalculateProcessCPUTime(ticks, kernel_system_time);
+  }
+
+  return true;
+}
+
 inline Result<Process> process(pid_t pid)
 {
-  /*
-  // Page size, used for memory accounting.
-  SYSTEM_INFO systemInfo;
-  GetNativeSystemInfo (&systemInfo);
-  static const long pageSize = systemInfo.dwPageSize;
-  if (pageSize <= 0) {
-  return Error("Failed to get SYSTEM_INFO::dwPageSize");
+  bool process_exists = false;
+
+  pid_t process_id = 0;
+  pid_t parent_process_id = 0;
+  pid_t session_id = 0;
+  std::string executable_filename = "";
+  size_t wss = 0;
+  double user_time = 0;
+  double system_time = 0;
+
+  // Get a snapshot of the proceses in the system.
+  HANDLE processes_handle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, pid);
+  if (processes_handle == INVALID_HANDLE_VALUE || processes_handle == NULL) {
+    return None();
   }
 
-  // Number of clock ticks per second, used for cpu accounting.
-  long tmpTicks = 0;
-  QueryPerformanceFrequency((LARGE_INTEGER*)&tmpTicks);
-  static const long ticks = tmpTicks;
-  if (ticks <= 0) {
-  return Error("Failed to get QueryPerformanceFrequency");
-  }
-  */
+  PROCESSENTRY32 process_entry;
+  process_entry.dwSize = sizeof(PROCESSENTRY32);
 
-  //
-  // TODO: What we need to do here is:
-  // - Check if process still exists based on pid
-  // - Get windows process stats and fill up process struct properly
-  return Process(pid,
-    0,
-    0,
-    0,
-    0,
-    Option<Duration>::none(),
-    Option<Duration>::none(),
-    "",
-    false);
+  // Point to the first process and start loop to
+  // find process.
+  Process32First(processes_handle, &process_entry);
+  do {
+    HANDLE process_handle = NULL;
+
+    if (process_entry.th32ProcessID == pid) {
+      process_exists = true;
+      break;
+    }
+  } while (Process32Next(processes_handle, &process_entry));
+
+  // Clean-up
+  CloseHandle(processes_handle);
+  processes_handle = NULL;
+
+  if (process_exists == false) {
+    return None();
+  }
+
+  // Process exists. Open process and get stats.
+  // Get process id and parent process id and filename.
+  process_id = process_entry.th32ProcessID;
+  parent_process_id = process_entry.th32ParentProcessID;
+  executable_filename = process_entry.szExeFile;
+
+  HANDLE process_handle = OpenProcess(
+    THREAD_ALL_ACCESS,
+    false,
+    process_id);
+  if (process_handle == INVALID_HANDLE_VALUE || process_handle == NULL) {
+    return None();
+  }
+
+  // Get Windows Working set size (Resident set size in linux).
+  PROCESS_MEMORY_COUNTERS info;
+  GetProcessMemoryInfo(process_handle, &info, sizeof(info));
+  wss = info.WorkingSetSize;
+
+  // Get session Id.
+  ProcessIdToSessionId(process_id, &session_id);
+
+  // Get Process CPU Time.
+  GetProcessCPUTime(process_handle, user_time, system_time);
+  Try<Duration> utime = Duration::create(user_time);
+  Try<Duration> stime = Duration::create(system_time);
+
+  // Clean up.
+  CloseHandle(process_handle);
+  process_handle = NULL;
+
+  return Process(
+    process_id,        // process id.
+    parent_process_id, // parent process id.
+    0,                 // group id.
+    session_id,        // session id.
+    Bytes(wss),        // wss.
+    utime.isSome() ? utime.get() : Option<Duration>::none(),
+    stime.isSome() ? stime.get() : Option<Duration>::none(),
+    executable_filename,
+    false);            // is not zombie process.
 }
+
 } // namespace os {
 
 
