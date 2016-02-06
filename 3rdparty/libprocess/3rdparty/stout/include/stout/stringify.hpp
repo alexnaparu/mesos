@@ -32,7 +32,9 @@ std::string stringify(T t)
   if (!out.good()) {
     ABORT("Failed to stringify!");
   }
-  return out.str();
+
+  std::string x = out.str();
+  return x;
 }
 
 
