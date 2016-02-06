@@ -43,7 +43,7 @@ using OutputFileDescriptors = Subprocess::IO::OutputFileDescriptors;
 
 namespace internal {
 
-static void cleanup(
+void cleanup(
     const Future<Option<int>>& result,
     Promise<Option<int>>* promise,
     const Subprocess& subprocess)
