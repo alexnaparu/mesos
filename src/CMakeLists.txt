@@ -362,6 +362,7 @@ set(MESOS_SRC
   ${VERSION_SRC}
   ${ZOOKEEPER_SRC}
   ${MASTER_SRC}
+  ${EXEC_SRC}
   )
 
 if (NOT WIN32)
@@ -370,7 +371,6 @@ if (NOT WIN32)
     ${AUTHENTICATION_SRC}
     ${AUTHORIZER_SRC}
     ${DOCKER_SRC}
-    ${EXEC_SRC}
     ${HDFS_SRC}
     ${LOCAL_SRC}
     ${LOG_SRC}
@@ -420,3 +420,4 @@ add_dependencies(${MESOS_TARGET} ${AGENT_DEPENDENCIES})
 target_link_libraries(${MESOS_TARGET} ${AGENT_LIBS})
 
 add_subdirectory(slave)
+add_subdirectory(launcher)
