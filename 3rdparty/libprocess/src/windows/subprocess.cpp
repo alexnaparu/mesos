@@ -79,6 +79,18 @@ static void close(
   }
 }
 
+// Returns either the file descriptor associated to the Windows handle, or
+// `Nothing` if the handle is invalid.
+static Option<int> getFileDescriptorFromHandle(
+    const Option<HANDLE>& handle,
+    int flags)
+{
+  int fd = ::_open_osfhandle(
+      (intptr_t)handle.getOrElse(INVALID_HANDLE_VALUE), flags);
+
+  return fd > 0 ? Option<int>(fd) : None();
+}
+
 // Opens a in inheritable pipe[1]. On success, `handles[0]` receives the 'read'
 // handle of the pipe, while `handles[1]` receives the 'write' handle. The pipe
 // handles can then be passed to a child process, as exemplified in [2].
@@ -177,14 +189,14 @@ Try<pid_t> CreateChildProcess(
   if (!argv.empty()) {
     // Start the `arguments` string with a space, since `CreateProcess` will
     // just append it to the `lpCommandLine` argument.
-    size_t argLength = 1;
+    size_t argLength = 0;
     foreach(string arg, argv) {
       argLength += arg.size() + 1;  // extra char for ' ' or trailing NULL.
     }
 
     arguments = new char[argLength];
-    arguments[0] = ' ';
-    size_t index = 1;
+    // arguments[0] = ' ';
+    size_t index = 0;
     foreach(string arg, argv) {
       strncpy(arguments + index, arg.c_str(), arg.size());
       index += arg.size();
@@ -506,17 +518,14 @@ Try<Subprocess> subprocess(
   // If the mode is PIPE, store the parent side of the pipe so that
   // the user can communicate with the subprocess. Windows uses handles for all
   // of these, so we need to associate them to file descriptors first.
-  process.data->in = ::_open_osfhandle(
-      (intptr_t)stdinfds.write.getOrElse(INVALID_HANDLE_VALUE),
-      _O_APPEND | _O_TEXT);
+  process.data->in = internal::getFileDescriptorFromHandle(
+      stdinfds.write, _O_APPEND | _O_TEXT);
 
-  process.data->out = ::_open_osfhandle(
-      (intptr_t)stdoutfds.read.getOrElse(INVALID_HANDLE_VALUE),
-      _O_RDONLY | _O_TEXT);
+  process.data->out = internal::getFileDescriptorFromHandle(
+      stdoutfds.read, _O_RDONLY | _O_TEXT);
 
-  process.data->err = ::_open_osfhandle(
-      (intptr_t)stderrfds.read.getOrElse(INVALID_HANDLE_VALUE),
-      _O_RDONLY | _O_TEXT);
+  process.data->err = internal::getFileDescriptorFromHandle(
+      stdoutfds.read, _O_RDONLY | _O_TEXT);
 
   // Rather than directly exposing the future from process::reap, we
   // must use an explicit promise so that we can ensure we can receive
