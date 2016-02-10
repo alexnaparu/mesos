@@ -118,7 +118,11 @@ using state::FrameworkState;
 using state::ExecutorState;
 using state::RunState;
 
+#ifdef __WINDOWS__
+const char MESOS_CONTAINERIZER[] = "mesos-containerizer.exe";
+#else
 const char MESOS_CONTAINERIZER[] = "mesos-containerizer";
+#endif // __WINDOWS__
 
 Try<MesosContainerizer*> MesosContainerizer::create(
     const Flags& flags,
@@ -1057,6 +1061,16 @@ Future<bool> MesosContainerizerProcess::__launch(
     // We assume this should not fail under reasonable conditions so we
     // use CHECK.
     // CHECK(pipe(pipes) == 0);
+    HANDLE handles[2];
+    SECURITY_ATTRIBUTES securityAttr;
+    securityAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    securityAttr.bInheritHandle = TRUE;
+    securityAttr.lpSecurityDescriptor = NULL;
+
+    CreatePipe(&handles[0], &handles[1], &securityAttr, 0);
+
+    pipes[0] = ::_open_osfhandle((intptr_t)handles[0], _O_RDONLY | _O_TEXT);
+    pipes[1] = ::_open_osfhandle((intptr_t)handles[1], _O_APPEND | _O_TEXT);
 
     // Prepare the flags to pass to the launch process.
     MesosContainerizerLaunch::Flags launchFlags;
