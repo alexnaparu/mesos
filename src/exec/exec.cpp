@@ -577,6 +577,7 @@ MesosExecutorDriver::MesosExecutorDriver(mesos::Executor* _executor)
 
   // Load any logging flags from the environment.
   logging::Flags flags;
+  flags.initialize();
 
   Try<Nothing> load = flags.load("MESOS_");
 
@@ -626,8 +627,8 @@ Status MesosExecutorDriver::start()
     // Set stream buffering mode to flush on newlines so that we
     // capture logs from user processes even when output is redirected
     // to a file.
-    setvbuf(stdout, 0, _IOLBF, 0);
-    setvbuf(stderr, 0, _IOLBF, 0);
+    setvbuf(stdout, 0, _IOLBF, 1024);
+    setvbuf(stderr, 0, _IOLBF, 1024);
 
     bool local;
 
