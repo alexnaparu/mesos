@@ -87,7 +87,6 @@ MesosContainerizerLaunch::Flags::Flags()
       "executing the command.");
 }
 
-
 int MesosContainerizerLaunch::execute()
 {
   // Check command line flags.
@@ -283,8 +282,8 @@ int MesosContainerizerLaunch::execute()
 
   if (command.get().shell()) {
     // Execute the command using shell.
-    execlp(os::Shell::name, os::Shell::arg0,
-           os::Shell::arg1, command.get().value().c_str(), (char*) NULL);
+    os::execlp(os::Shell::name, os::Shell::arg0,
+               os::Shell::arg1, command.get().value().c_str(), (char*) NULL);
   } else {
     // Use execvp to launch the command.
     char** argv = new char*[command.get().arguments().size() + 1];
