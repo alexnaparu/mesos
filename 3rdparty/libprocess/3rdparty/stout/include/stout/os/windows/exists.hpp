@@ -58,7 +58,6 @@ inline bool exists(pid_t pid)
   // NOTE: `GetExitCode` will gracefully deal with the case that `handle` is
   // `NULL`.
   DWORD exitCode = 0;
-  WaitForSingleObject(handle, -1);
   BOOL exitCodeExists = GetExitCodeProcess(handle, &exitCode);
 
   // `CloseHandle`, on the other hand, will throw an exception in the
