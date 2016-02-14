@@ -448,7 +448,7 @@ public:
   ::ZeroMemory(&startupInfo, sizeof(STARTUPINFO));
 
   startupInfo.cb = sizeof(STARTUPINFO);
-
+  string cmd = os::getenv("WINDIR").get()+"\\system32\\cmd.exe";
   BOOL createProcessResult = ::CreateProcess(
     NULL,
     (LPSTR)command.value().c_str(), // Command line arguments[1].
