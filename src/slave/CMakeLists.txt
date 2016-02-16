@@ -29,6 +29,8 @@ set(PROCESS_AGENT_SRC
 #  ../master/detector.cpp
   )
 
+add_definitions(-DUSE_STATIC_LIB)
+
 # INCLUDE DIRECTIVES FOR PROCESS TEST BINARY (generates, e.g., -I/path/to/thing
 # on Linux).
 ###############################################################################
@@ -51,6 +53,7 @@ if (WIN32)
     ${MESOS_TARGET}
     ${PROCESS_TARGET}
     ${HTTP_PARSER_LFLAG}
+    ${ZOOKEEPER_LFLAG}
       ws2_32
   )
 endif (WIN32)
