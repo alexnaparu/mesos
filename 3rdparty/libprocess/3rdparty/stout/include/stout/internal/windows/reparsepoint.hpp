@@ -159,13 +159,14 @@ inline Try<SymbolicLink> build_symbolic_link(const REPARSE_DATA_BUFFER& data)
 // refer to the symlink rather than the file or folder the symlink points at.
 inline Try<SharedHandle> get_handle_no_follow(const std::string& absolute_path)
 {
-  struct _stat absolute_path_stat;
-  bool resolved_path_is_directory = false;
-  if (::_stat(absolute_path.c_str(), &absolute_path_stat) == 0) {
-    resolved_path_is_directory = S_ISDIR(absolute_path_stat.st_mode);
-  } else {
-    return ErrnoError("'_stat' failed on path '" + absolute_path + "'");
+  DWORD attributes = ::GetFileAttributes(absolute_path.c_str());
+  if (attributes == INVALID_FILE_ATTRIBUTES) {
+    return WindowsError(
+        "'GetFileAttributes' failed on path '" + absolute_path + "'");
   }
+
+  const bool resolved_path_is_directory =
+      (attributes & FILE_ATTRIBUTE_DIRECTORY != 0);
 
   // NOTE: According to the `CreateFile` documentation[1], the `OPEN_EXISTING`
   // and `FILE_FLAG_OPEN_REPARSE_POINT` flags need to be used when getting a
@@ -299,12 +300,13 @@ inline Try<Nothing> create_symbolic_link(
 
   // Determine if target is a folder or a file. This makes a difference
   // in the way we call `create_symbolic_link`.
-  struct _stat absolute_target_path_stat;
-  if (::_stat(absolute_target_path.c_str(), &absolute_target_path_stat) != 0) {
-    return ErrnoError("'_stat' failed on path '" + absolute_target_path + "'");
+  DWORD attributes = ::GetFileAttributes(absolute_target_path.c_str());
+  if (attributes == INVALID_FILE_ATTRIBUTES) {
+    return WindowsError(
+      "'GetFileAttributes' failed on path '" + absolute_target_path + "'");
   }
 
-  const bool target_is_folder = S_ISDIR(absolute_target_path_stat.st_mode);
+  const bool target_is_folder = (attributes & FILE_ATTRIBUTE_DIRECTORY != 0);
 
   // Bail out if target is already a reparse point.
   Try<bool> attribute_set = reparse_point_attribute_set(absolute_target_path);
