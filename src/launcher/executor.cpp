@@ -17,10 +17,6 @@
 #include <signal.h>
 #include <stdio.h>
 
-#ifndef __WINDOWS__
-#include <sys/wait.h>
-#endif // __WINDOWS__
-
 #include <iostream>
 #include <list>
 #include <string>
@@ -68,16 +64,7 @@
 #include "messages/messages.hpp"
 
 #include "slave/constants.hpp"
-
-// Windows defines from NetBios header
-
-#ifdef REGISTERING
-#undef REGISTERING
-#endif // REGISTERING
-#ifdef REGISTERED
-#undef REGISTERED
-#endif // REGISTERED
-
+#include "executor.hpp"
 
 using namespace mesos::internal::slave;
 
@@ -95,699 +82,347 @@ namespace internal {
 using namespace process;
 
 
-class CommandExecutorProcess : public ProtobufProcess<CommandExecutorProcess>
+void CommandExecutorProcess::registered(
+    ExecutorDriver* _driver,
+    const ExecutorInfo& _executorInfo,
+    const FrameworkInfo& frameworkInfo,
+    const SlaveInfo& slaveInfo)
 {
-public:
-  CommandExecutorProcess(
-      const Option<char**>& override,
-      const string& _healthCheckDir,
-      const Option<string>& _sandboxDirectory,
-      const Option<string>& _workingDirectory,
-      const Option<string>& _user,
-      const Option<string>& _taskCommand)
-    : state(REGISTERING),
-      launched(false),
-      killed(false),
-      killedByHealthCheck(false),
-      pid(-1),
-      healthPid(-1),
-      escalationTimeout(slave::EXECUTOR_SIGNAL_ESCALATION_TIMEOUT),
-      driver(None()),
-      healthCheckDir(_healthCheckDir),
-      override(override),
-      sandboxDirectory(_sandboxDirectory),
-      workingDirectory(_workingDirectory),
-      user(_user),
-      taskCommand(_taskCommand) {}
+  CHECK_EQ(REGISTERING, state);
 
-  virtual ~CommandExecutorProcess() {}
-
-  void registered(
-      ExecutorDriver* _driver,
-      const ExecutorInfo& _executorInfo,
-      const FrameworkInfo& frameworkInfo,
-      const SlaveInfo& slaveInfo)
-  {
-    CHECK_EQ(REGISTERING, state);
-
-    cout << "Registered executor on " << slaveInfo.hostname() << endl;
-    driver = _driver;
-    state = REGISTERED;
-  }
-
-  void reregistered(
-      ExecutorDriver* driver,
-      const SlaveInfo& slaveInfo)
-  {
-    CHECK(state == REGISTERED || state == REGISTERING) << state;
-
-    cout << "Re-registered executor on " << slaveInfo.hostname() << endl;
-    state = REGISTERED;
-  }
-
-  void disconnected(ExecutorDriver* driver) {}
-
-#ifndef __WINDOWS__
-
-  void launchTaskPosix(const string& command, const char** argv)
-  {
-    // TODO(benh): Clean this up with the new 'Fork' abstraction.
-    // Use pipes to determine which child has successfully changed
-    // session. This is needed as the setsid call can fail from other
-    // processes having the same group id.
-    process::Pipe pipe;
-    Try<Nothing> createPipe = pipe.Create();
-
-    if (createPipe.isError()) {
-      perror("Failed to create IPC pipe");
-      abort();
-    }
-
-    // Set the FD_CLOEXEC flags on these pipes.
-    Try<Nothing> cloexec = os::cloexec(pipe.read);
-    if (cloexec.isError()) {
-      cerr << "Failed to cloexec(pipe[0]): " << cloexec.error() << endl;
-      abort();
-    }
-
-    cloexec = os::cloexec(pipe.write);
-    if (cloexec.isError()) {
-      cerr << "Failed to cloexec(pipe[1]): " << cloexec.error() << endl;
-      abort();
-    }
-
-    Option<string> rootfs;
-    if (sandboxDirectory.isSome()) {
-      // If 'sandbox_diretory' is specified, that means the user
-      // task specifies a root filesystem, and that root filesystem has
-      // already been prepared at COMMAND_EXECUTOR_ROOTFS_CONTAINER_PATH.
-      // The command executor is responsible for mounting the sandbox
-      // into the root filesystem, chrooting into it and changing the
-      // user before exec-ing the user process.
-      //
-      // TODO(gilbert): Consider a better way to detect if a root
-      // filesystem is specified for the command task.
-#ifdef __linux__
-      Result<string> user = os::user();
-      if (user.isError()) {
-        cerr << "Failed to get current user: " << user.error() << endl;
-        abort();
-      }
-      else if (user.isNone()) {
-        cerr << "Current username is not found" << endl;
-        abort();
-      }
-      else if (user.get() != "root") {
-        cerr << "The command executor requires root with rootfs" << endl;
-        abort();
-      }
-
-      rootfs = path::join(
-        os::getcwd(), COMMAND_EXECUTOR_ROOTFS_CONTAINER_PATH);
-
-      string sandbox = path::join(rootfs.get(), sandboxDirectory.get());
-      if (!os::exists(sandbox)) {
-        Try<Nothing> mkdir = os::mkdir(sandbox);
-        if (mkdir.isError()) {
-          cerr << "Failed to create sandbox mount point  at '"
-            << sandbox << "': " << mkdir.error() << endl;
-          abort();
-        }
-      }
-
-      // Mount the sandbox into the container rootfs.
-      // We need to perform a recursive mount because we want all the
-      // volume mounts in the sandbox to be also mounted in the container
-      // root filesystem. However, since the container root filesystem
-      // is also mounted in the sandbox, after the recursive mount we
-      // also need to unmount the root filesystem in the mounted sandbox.
-      Try<Nothing> mount = fs::mount(
-        os::getcwd(),
-        sandbox,
-        None(),
-        MS_BIND | MS_REC,
-        NULL);
-
-      if (mount.isError()) {
-        cerr << "Unable to mount the work directory into container "
-          << "rootfs: " << mount.error() << endl;;
-        abort();
-      }
-
-      // Umount the root filesystem path in the mounted sandbox after
-      // the recursive mount.
-      Try<Nothing> unmountAll = fs::unmountAll(path::join(
-        sandbox,
-        COMMAND_EXECUTOR_ROOTFS_CONTAINER_PATH));
-      if (unmountAll.isError()) {
-        cerr << "Unable to unmount rootfs under mounted sandbox: "
-          << unmountAll.error() << endl;
-        abort();
-      }
-#else
-      cerr << "Not expecting root volume with non-linux platform." << endl;
-      abort();
-#endif // __linux__
-    }
-
-    if ((pid = fork()) == -1) {
-      cerr << "Failed to fork to run " << commandString << ": "
-        << os::strerror(errno) << endl;
-      abort();
-    }
-
-    // TODO(jieyu): Make the child process async signal safe.
-    if (pid == 0) {
-      // In child process, we make cleanup easier by putting process
-      // into it's own session.
-      os::close(pipe.read);
-
-      // NOTE: We setsid() in a loop because setsid() might fail if another
-      // process has the same process group id as the calling process.
-      while ((pid = setsid()) == -1) {
-        perror("Could not put command in its own session, setsid");
-
-        cout << "Forking another process and retrying" << endl;
-
-        if ((pid = fork()) == -1) {
-          perror("Failed to fork to launch command");
-          abort();
-        }
-
-        if (pid > 0) {
-          // In parent process. It is ok to suicide here, because
-          // we're not watching this process.
-          exit(0);
-        }
-      }
-
-      if (write(pipe.write, &pid, sizeof(pid)) != sizeof(pid)) {
-        perror("Failed to write PID on pipe");
-        abort();
-      }
-
-      os::close(pipe.write);
-
-      if (rootfs.isSome()) {
-#ifdef __linux__
-        if (user.isSome()) {
-          // This is a work around to fix the problem that after we chroot
-          // os::su call afterwards failed because the linker may not be
-          // able to find the necessary library in the rootfs.
-          // We call os::su before chroot here to force the linker to load
-          // into memory.
-          // We also assume it's safe to su to "root" user since
-          // filesystem/linux.cpp checks for root already.
-          os::su("root");
-        }
-
-        Try<Nothing> chroot = fs::chroot::enter(rootfs.get());
-        if (chroot.isError()) {
-          cerr << "Failed to enter chroot '" << rootfs.get()
-            << "': " << chroot.error() << endl;;
-          abort();
-        }
-
-        // Determine the current working directory for the executor.
-        string cwd;
-        if (workingDirectory.isSome()) {
-          cwd = workingDirectory.get();
-        }
-        else {
-          CHECK_SOME(sandboxDirectory);
-          cwd = sandboxDirectory.get();
-        }
-
-        Try<Nothing> chdir = os::chdir(cwd);
-        if (chdir.isError()) {
-          cerr << "Failed to chdir into current working directory '"
-            << cwd << "': " << chdir.error() << endl;
-          abort();
-        }
-
-        if (user.isSome()) {
-          Try<Nothing> su = os::su(user.get());
-          if (su.isError()) {
-            cerr << "Failed to change user to '" << user.get() << "': "
-              << su.error() << endl;
-            abort();
-          }
-        }
-#else
-        cerr << "Rootfs is only supported on Linux" << endl;
-        abort();
-#endif // __linux__
-      }
-
-      // The child has successfully setsid, now run the command.
-      if (override.isNone()) {
-        if (command.shell()) {
-          execlp(
-            os::Shell::name,
-            os::Shell::arg0,
-            os::Shell::arg1,
-            task.command().value().c_str(),
-            (char*)NULL);
-        }
-        else {
-          execvp(command.value().c_str(), argv);
-        }
-      }
-      else {
-        char** argv = override.get();
-        execvp(argv[0], argv);
-      }
-
-      perror("Failed to exec");
-      abort();
-    }
-
-    // In parent process.
-    os::close(pipe.write);
-
-    // Get the child's pid via the pipe.
-    if (read(pipe.read, &pid, sizeof(pid)) == -1) {
-      cerr << "Failed to get child PID from pipe, read: "
-        << os::strerror(errno) << endl;
-      abort();
-    }
-
-    os::close(pipe.read);
-  }
-#endif // !__WINDOWS__
-
-pid_t launchTaskWindows(
-  const TaskInfo& task,
-  const CommandInfo& command,
-  const char** argv)
-{
-  PROCESS_INFORMATION processInfo;
-  ::ZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
-
-  STARTUPINFO startupInfo;
-  ::ZeroMemory(&startupInfo, sizeof(STARTUPINFO));
-  startupInfo.cb = sizeof(STARTUPINFO);
-
-  string executable;
-  string commandLine = task.command().value();
-
-  if (override.isNone()) {
-    if (command.shell()) {
-      // Use Windows shell (`cmd.exe`). Look for it in the system folder.
-      char systemDir[MAX_PATH];
-      if (!::GetSystemDirectory(systemDir, MAX_PATH)) {
-        // No way to recover from this, safe to exit the process.
-        abort();
-      }
-
-      executable = path::join(systemDir, os::Shell::name);
-
-      // `cmd.exe` needs to be used in conjunction with the `/c` parameter.
-      // For compliance with C-style applications, `cmd.exe` should be passed
-      // as `argv[0]`.
-      // TODO(alexnaparu): Quotes are probably needed after `/c`.
-      commandLine = os::args(
-          os::Shell::arg0, os::Shell::arg1, commandLine);
-    }
-    else {
-      // Not a shell command, execute as-is.
-      executable = command.value();
-      commandLine = os::stringify_args(argv);
-    }
-  }
-  else {
-    // Convert all arguments to a single space-separated string.
-    commandLine = os::stringify_args((const char**)override.get());
-  }
-
-  // There are many wrappers on `CreateProcess` that are more user-friendly,
-  // but they don't return the PID of the child process.
-  BOOL createProcessResult = ::CreateProcess(
-      executable.empty() ? NULL : executable.c_str(), // Module to load.
-      (LPSTR)commandLine.c_str(),                     // Command line.
-      NULL,                 // Default security attributes.
-      NULL,                 // Default primary thread security attributes.
-      TRUE,                 // Inherited parent process handles.
-      0,                    // Default creation flags.
-      NULL,                 // Use parent's environment.
-      NULL,                 // Use parent's current directory.
-      &startupInfo,         // STARTUPINFO pointer.
-      &processInfo);        // PROCESS_INFORMATION pointer.
-
-  if (!createProcessResult) {
-    cout << "launchTaskWindows: CreateProcess failed with error code" <<
-        GetLastError() << endl;
-
-    abort();
-  }
-
-  return processInfo.dwProcessId;
+  cout << "Registered executor on " << slaveInfo.hostname() << endl;
+  driver = _driver;
+  state = REGISTERED;
 }
 
-  void launchTask(ExecutorDriver* driver, const TaskInfo& task)
-  {
-    CHECK_EQ(REGISTERED, state);
+void CommandExecutorProcess::reregistered(
+    ExecutorDriver* driver,
+    const SlaveInfo& slaveInfo)
+{
+  CHECK(state == REGISTERED || state == REGISTERING) << state;
 
-    if (launched) {
-      TaskStatus status;
-      status.mutable_task_id()->MergeFrom(task.task_id());
-      status.set_state(TASK_FAILED);
-      status.set_message(
-          "Attempted to run multiple tasks using a \"command\" executor");
+  cout << "Re-registered executor on " << slaveInfo.hostname() << endl;
+  state = REGISTERED;
+}
 
-      driver->sendStatusUpdate(status);
-      return;
-    }
 
-    // Determine the command to launch the task.
-    CommandInfo command;
+void CommandExecutorProcess::launchTask(
+    ExecutorDriver* driver,
+    const TaskInfo& task)
+{
+  CHECK_EQ(REGISTERED, state);
 
-    if (taskCommand.isSome()) {
-      // Get CommandInfo from a JSON string.
-      Try<JSON::Object> object = JSON::parse<JSON::Object>(taskCommand.get());
-      if (object.isError()) {
-        cerr << "Failed to parse JSON: " << object.error() << endl;
-        abort();
-      }
-
-      Try<CommandInfo> parse = protobuf::parse<CommandInfo>(object.get());
-      if (parse.isError()) {
-        cerr << "Failed to parse protobuf: " << parse.error() << endl;
-        abort();
-      }
-
-      command = parse.get();
-    } else if (task.has_command()) {
-      command = task.command();
-    } else {
-      CHECK_SOME(override)
-        << "Expecting task '" << task.task_id()
-        << "' to have a command!";
-    }
-
-    if (override.isNone()) {
-      // TODO(jieyu): For now, we just fail the executor if the task's
-      // CommandInfo is not valid. The framework will receive
-      // TASK_FAILED for the task, and will most likely find out the
-      // cause with some debugging. This is a temporary solution. A more
-      // correct solution is to perform this validation at master side.
-      if (command.shell()) {
-        CHECK(command.has_value())
-          << "Shell command of task '" << task.task_id()
-          << "' is not specified!";
-      } else {
-        CHECK(command.has_value())
-          << "Executable of task '" << task.task_id()
-          << "' is not specified!";
-      }
-    }
-
-    cout << "Starting task " << task.task_id() << endl;
-
-    // Prepare the argv before fork as it's not async signal safe.
-    char **argv = new char*[command.arguments().size() + 1];
-    for (int i = 0; i < command.arguments().size(); i++) {
-      argv[i] = (char*)command.arguments(i).c_str();
-    }
-    argv[command.arguments().size()] = NULL;
-
-    // Prepare the command log message.
-    string commandString;
-    if (override.isSome()) {
-      char** argv = override.get();
-      // argv is guaranteed to be NULL terminated and we rely on
-      // that fact to print command to be executed.
-      for (int i = 0; argv[i] != NULL; i++) {
-        commandString += string(argv[i]) + " ";
-      }
-    }
-    else if (command.shell()) {
-      commandString = string(os::Shell::arg0) + " " +
-        string(os::Shell::arg1) + " '" +
-        command.value() + "'";
-    }
-    else {
-      commandString =
-        "[" + command.value() + ", " +
-        strings::join(", ", command.arguments()) + "]";
-    }
-
-    cout << commandString << endl;
-
-#ifndef __WINDOWS__
-    pid = launchTaskPosix(command, argv);
-#else
-    pid = launchTaskWindows(task, command, (const char**)argv);
-#endif
-
-    delete[] argv;
-
-    cout << "Forked command at " << pid << endl;
-
-    launchHealthCheck(task);
-
-    // Monitor this process.
-    process::reap(pid)
-      .onAny(defer(self(),
-                   &Self::reaped,
-                   driver,
-                   task.task_id(),
-                   pid,
-                   lambda::_1));
-
+  if (launched) {
     TaskStatus status;
     status.mutable_task_id()->MergeFrom(task.task_id());
-    status.set_state(TASK_RUNNING);
+    status.set_state(TASK_FAILED);
+    status.set_message(
+        "Attempted to run multiple tasks using a \"command\" executor");
+
     driver->sendStatusUpdate(status);
-
-    launched = true;
+    return;
   }
 
-  void killTask(ExecutorDriver* driver, const TaskID& taskId)
-  {
-    shutdown(driver);
-    if (healthPid != -1) {
-      // Cleanup health check process.
-      os::killtree(healthPid, SIGKILL);
-    }
-  }
+  // Determine the command to launch the task.
+  CommandInfo command;
 
-  void frameworkMessage(ExecutorDriver* driver, const string& data) {}
-
-  void shutdown(ExecutorDriver* driver)
-  {
-    cout << "Shutting down" << endl;
-
-    if (pid > 0 && !killed) {
-      cout << "Sending SIGTERM to process tree at pid "
-           << pid << endl;
-
-      Try<std::list<os::ProcessTree> > trees =
-        os::killtree(pid, SIGTERM, true, true);
-
-      if (trees.isError()) {
-        cerr << "Failed to kill the process tree rooted at pid "
-             << pid << ": " << trees.error() << endl;
-
-        // Send SIGTERM directly to process 'pid' as it may not have
-        // received signal before os::killtree() failed.
-        os::kill(pid, SIGTERM);
-      } else {
-        cout << "Killing the following process trees:\n"
-             << stringify(trees.get()) << endl;
-      }
-
-      // TODO(nnielsen): Make escalationTimeout configurable through
-      // slave flags and/or per-framework/executor.
-      escalationTimer = delay(
-          escalationTimeout,
-          self(),
-          &Self::escalated);
-
-      killed = true;
-    }
-  }
-
-  virtual void error(ExecutorDriver* driver, const string& message) {}
-
-protected:
-  virtual void initialize()
-  {
-    install<TaskHealthStatus>(
-        &CommandExecutorProcess::taskHealthUpdated,
-        &TaskHealthStatus::task_id,
-        &TaskHealthStatus::healthy,
-        &TaskHealthStatus::kill_task);
-  }
-
-  void taskHealthUpdated(
-      const TaskID& taskID,
-      const bool& healthy,
-      const bool& initiateTaskKill)
-  {
-    if (driver.isNone()) {
-      return;
+  if (taskCommand.isSome()) {
+    // Get CommandInfo from a JSON string.
+    Try<JSON::Object> object = JSON::parse<JSON::Object>(taskCommand.get());
+    if (object.isError()) {
+      cerr << "Failed to parse JSON: " << object.error() << endl;
+      abort();
     }
 
-    cout << "Received task health update, healthy: "
-         << stringify(healthy) << endl;
-
-    TaskStatus status;
-    status.mutable_task_id()->CopyFrom(taskID);
-    status.set_healthy(healthy);
-    status.set_state(TASK_RUNNING);
-    driver.get()->sendStatusUpdate(status);
-
-    if (initiateTaskKill) {
-      killedByHealthCheck = true;
-      killTask(driver.get(), taskID);
+    Try<CommandInfo> parse = protobuf::parse<CommandInfo>(object.get());
+    if (parse.isError()) {
+      cerr << "Failed to parse protobuf: " << parse.error() << endl;
+      abort();
     }
+
+    command = parse.get();
+  } else if (task.has_command()) {
+    command = task.command();
+  } else {
+    CHECK_SOME(override)
+      << "Expecting task '" << task.task_id()
+      << "' to have a command!";
   }
 
-
-private:
-  void reaped(
-      ExecutorDriver* driver,
-      const TaskID& taskId,
-      pid_t pid,
-      const Future<Option<int> >& status_)
-  {
-    TaskState taskState;
-    string message;
-
-    Clock::cancel(escalationTimer);
-
-    if (!status_.isReady()) {
-      taskState = TASK_FAILED;
-      message =
-        "Failed to get exit status for Command: " +
-        (status_.isFailed() ? status_.failure() : "future discarded");
-    } else if (status_.get().isNone()) {
-      taskState = TASK_FAILED;
-      message = "Failed to get exit status for Command";
+  if (override.isNone()) {
+    // TODO(jieyu): For now, we just fail the executor if the task's
+    // CommandInfo is not valid. The framework will receive
+    // TASK_FAILED for the task, and will most likely find out the
+    // cause with some debugging. This is a temporary solution. A more
+    // correct solution is to perform this validation at master side.
+    if (command.shell()) {
+      CHECK(command.has_value())
+        << "Shell command of task '" << task.task_id()
+        << "' is not specified!";
     } else {
-      int status = status_.get().get();
-      CHECK(WIFEXITED(status) || WIFSIGNALED(status)) << status;
-
-      if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        taskState = TASK_FINISHED;
-      } else if (killed) {
-        // Send TASK_KILLED if the task was killed as a result of
-        // killTask() or shutdown().
-        taskState = TASK_KILLED;
-      } else {
-        taskState = TASK_FAILED;
-      }
-
-      message = "Command " + WSTRINGIFY(status);
+      CHECK(command.has_value())
+        << "Executable of task '" << task.task_id()
+        << "' is not specified!";
     }
-
-    cout << message << " (pid: " << pid << ")" << endl;
-
-    TaskStatus taskStatus;
-    taskStatus.mutable_task_id()->MergeFrom(taskId);
-    taskStatus.set_state(taskState);
-    taskStatus.set_message(message);
-    if (killed && killedByHealthCheck) {
-      taskStatus.set_healthy(false);
-    }
-
-    driver->sendStatusUpdate(taskStatus);
-
-    // This is a hack to ensure the message is sent to the
-    // slave before we exit the process. Without this, we
-    // may exit before libprocess has sent the data over
-    // the socket. See MESOS-4111.
-    os::sleep(Seconds(1));
-    driver->stop();
   }
 
-  void escalated()
-  {
-    cout << "Process " << pid << " did not terminate after "
-         << escalationTimeout << ", sending SIGKILL to "
-         << "process tree at " << pid << endl;
+  cout << "Starting task " << task.task_id() << endl;
 
-    // TODO(nnielsen): Sending SIGTERM in the first stage of the
-    // shutdown may leave orphan processes hanging off init. This
-    // scenario will be handled when PID namespace encapsulated
-    // execution is in place.
+  // Prepare the argv before fork as it's not async signal safe.
+  char **argv = new char*[command.arguments().size() + 1];
+  for (int i = 0; i < command.arguments().size(); i++) {
+    argv[i] = (char*)command.arguments(i).c_str();
+  }
+  argv[command.arguments().size()] = NULL;
+
+  // Prepare the command log message.
+  string commandString;
+  if (override.isSome()) {
+    char** argv = override.get();
+    // argv is guaranteed to be NULL terminated and we rely on
+    // that fact to print command to be executed.
+    for (int i = 0; argv[i] != NULL; i++) {
+      commandString += string(argv[i]) + " ";
+    }
+  }
+  else if (command.shell()) {
+    commandString = string(os::Shell::arg0) + " " +
+      string(os::Shell::arg1) + " '" +
+      command.value() + "'";
+  }
+  else {
+    commandString =
+      "[" + command.value() + ", " +
+      strings::join(", ", command.arguments()) + "]";
+  }
+
+  cout << commandString << endl;
+
+  // The actual work of launching the task is platform-specific and is done
+  // in here.
+  pid = _launchTask(task, command, (const char**)argv);
+
+  delete[] argv;
+
+  cout << "Forked command at " << pid << endl;
+
+  launchHealthCheck(task);
+
+  // Monitor this process.
+  process::reap(pid)
+    .onAny(defer(self(),
+                  &Self::reaped,
+                  driver,
+                  task.task_id(),
+                  pid,
+                  lambda::_1));
+
+  TaskStatus status;
+  status.mutable_task_id()->MergeFrom(task.task_id());
+  status.set_state(TASK_RUNNING);
+  driver->sendStatusUpdate(status);
+
+  launched = true;
+}
+
+void CommandExecutorProcess::killTask(
+    ExecutorDriver* driver, const TaskID& taskId)
+{
+  shutdown(driver);
+  if (healthPid != -1) {
+    // Cleanup health check process.
+    os::killtree(healthPid, SIGKILL);
+  }
+}
+
+void CommandExecutorProcess::shutdown(ExecutorDriver* driver)
+{
+  cout << "Shutting down" << endl;
+
+  if (pid > 0 && !killed) {
+    cout << "Sending SIGTERM to process tree at pid "
+          << pid << endl;
+
     Try<std::list<os::ProcessTree> > trees =
-      os::killtree(pid, SIGKILL, true, true);
+      os::killtree(pid, SIGTERM, true, true);
 
     if (trees.isError()) {
       cerr << "Failed to kill the process tree rooted at pid "
-           << pid << ": " << trees.error() << endl;
+            << pid << ": " << trees.error() << endl;
 
-      // Process 'pid' may not have received signal before
-      // os::killtree() failed. To make sure process 'pid' is reaped
-      // we send SIGKILL directly.
-      os::kill(pid, SIGKILL);
+      // Send SIGTERM directly to process 'pid' as it may not have
+      // received signal before os::killtree() failed.
+      os::kill(pid, SIGTERM);
     } else {
-      cout << "Killed the following process trees:\n" << stringify(trees.get())
-           << endl;
+      cout << "Killing the following process trees:\n"
+            << stringify(trees.get()) << endl;
     }
+
+    // TODO(nnielsen): Make escalationTimeout configurable through
+    // slave flags and/or per-framework/executor.
+    escalationTimer = delay(
+        escalationTimeout,
+        self(),
+        &Self::escalated);
+
+    killed = true;
+  }
+}
+
+void CommandExecutorProcess::initialize()
+{
+  install<TaskHealthStatus>(
+      &CommandExecutorProcess::taskHealthUpdated,
+      &TaskHealthStatus::task_id,
+      &TaskHealthStatus::healthy,
+      &TaskHealthStatus::kill_task);
+}
+
+void CommandExecutorProcess::taskHealthUpdated(
+    const TaskID& taskID,
+    const bool& healthy,
+    const bool& initiateTaskKill)
+{
+  if (driver.isNone()) {
+    return;
   }
 
-  void launchHealthCheck(const TaskInfo& task)
-  {
-    if (task.has_health_check()) {
-      JSON::Object json = JSON::protobuf(task.health_check());
+  cout << "Received task health update, healthy: "
+        << stringify(healthy) << endl;
 
-      // Launch the subprocess using 'exec' style so that quotes can
-      // be properly handled.
-      vector<string> argv(4);
-      argv[0] = "mesos-health-check";
-      argv[1] = "--executor=" + stringify(self());
-      argv[2] = "--health_check_json=" + stringify(json);
-      argv[3] = "--task_id=" + task.task_id().value();
+  TaskStatus status;
+  status.mutable_task_id()->CopyFrom(taskID);
+  status.set_healthy(healthy);
+  status.set_state(TASK_RUNNING);
+  driver.get()->sendStatusUpdate(status);
 
-      cout << "Launching health check process: "
-           << path::join(healthCheckDir, "mesos-health-check")
-           << " " << argv[1] << " " << argv[2] << " " << argv[3] << endl;
+  if (initiateTaskKill) {
+    killedByHealthCheck = true;
+    killTask(driver.get(), taskID);
+  }
+}
 
-      Try<Subprocess> healthProcess =
-        process::subprocess(
-          path::join(healthCheckDir, "mesos-health-check"),
-          argv,
-          // Intentionally not sending STDIN to avoid health check
-          // commands that expect STDIN input to block.
-          Subprocess::PATH("/dev/null"),
-          Subprocess::FD(STDOUT_FILENO),
-          Subprocess::FD(STDERR_FILENO));
 
-      if (healthProcess.isError()) {
-        cerr << "Unable to launch health process: " << healthProcess.error();
-      } else {
-        healthPid = healthProcess.get().pid();
+void CommandExecutorProcess::reaped(
+    ExecutorDriver* driver,
+    const TaskID& taskId,
+    pid_t pid,
+    const Future<Option<int> >& status_)
+{
+  TaskState taskState;
+  string message;
 
-        cout << "Health check process launched at pid: "
-             << stringify(healthPid) << endl;
-      }
+  Clock::cancel(escalationTimer);
+
+  if (!status_.isReady()) {
+    taskState = TASK_FAILED;
+    message =
+      "Failed to get exit status for Command: " +
+      (status_.isFailed() ? status_.failure() : "future discarded");
+  } else if (status_.get().isNone()) {
+    taskState = TASK_FAILED;
+    message = "Failed to get exit status for Command";
+  } else {
+    int status = status_.get().get();
+    CHECK(WIFEXITED(status) || WIFSIGNALED(status)) << status;
+
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+      taskState = TASK_FINISHED;
+    } else if (killed) {
+      // Send TASK_KILLED if the task was killed as a result of
+      // killTask() or shutdown().
+      taskState = TASK_KILLED;
+    } else {
+      taskState = TASK_FAILED;
     }
+
+    message = "Command " + WSTRINGIFY(status);
   }
 
-  enum State
-  {
-    REGISTERING, // Executor is launched but not (re-)registered yet.
-    REGISTERED,  // Executor has (re-)registered.
-  } state;
+  cout << message << " (pid: " << pid << ")" << endl;
 
-  bool launched;
-  bool killed;
-  bool killedByHealthCheck;
-  pid_t pid;
-  pid_t healthPid;
-  Duration escalationTimeout;
-  Timer escalationTimer;
-  Option<ExecutorDriver*> driver;
-  string healthCheckDir;
-  Option<char**> override;
-  Option<string> sandboxDirectory;
-  Option<string> workingDirectory;
-  Option<string> user;
-  Option<string> taskCommand;
-};
+  TaskStatus taskStatus;
+  taskStatus.mutable_task_id()->MergeFrom(taskId);
+  taskStatus.set_state(taskState);
+  taskStatus.set_message(message);
+  if (killed && killedByHealthCheck) {
+    taskStatus.set_healthy(false);
+  }
+
+  driver->sendStatusUpdate(taskStatus);
+
+  // This is a hack to ensure the message is sent to the
+  // slave before we exit the process. Without this, we
+  // may exit before libprocess has sent the data over
+  // the socket. See MESOS-4111.
+  os::sleep(Seconds(1));
+  driver->stop();
+}
+
+void CommandExecutorProcess::escalated()
+{
+  cout << "Process " << pid << " did not terminate after "
+        << escalationTimeout << ", sending SIGKILL to "
+        << "process tree at " << pid << endl;
+
+  // TODO(nnielsen): Sending SIGTERM in the first stage of the
+  // shutdown may leave orphan processes hanging off init. This
+  // scenario will be handled when PID namespace encapsulated
+  // execution is in place.
+  Try<std::list<os::ProcessTree> > trees =
+    os::killtree(pid, SIGKILL, true, true);
+
+  if (trees.isError()) {
+    cerr << "Failed to kill the process tree rooted at pid "
+          << pid << ": " << trees.error() << endl;
+
+    // Process 'pid' may not have received signal before
+    // os::killtree() failed. To make sure process 'pid' is reaped
+    // we send SIGKILL directly.
+    os::kill(pid, SIGKILL);
+  } else {
+    cout << "Killed the following process trees:\n" << stringify(trees.get())
+          << endl;
+  }
+}
+
+void CommandExecutorProcess::launchHealthCheck(const TaskInfo& task)
+{
+  if (task.has_health_check()) {
+    JSON::Object json = JSON::protobuf(task.health_check());
+
+    // Launch the subprocess using 'exec' style so that quotes can
+    // be properly handled.
+    vector<string> argv(4);
+    argv[0] = "mesos-health-check";
+    argv[1] = "--executor=" + stringify(self());
+    argv[2] = "--health_check_json=" + stringify(json);
+    argv[3] = "--task_id=" + task.task_id().value();
+
+    cout << "Launching health check process: "
+          << path::join(healthCheckDir, "mesos-health-check")
+          << " " << argv[1] << " " << argv[2] << " " << argv[3] << endl;
+
+    Try<Subprocess> healthProcess =
+      process::subprocess(
+        path::join(healthCheckDir, "mesos-health-check"),
+        argv,
+        // Intentionally not sending STDIN to avoid health check
+        // commands that expect STDIN input to block.
+        Subprocess::PATH("/dev/null"),
+        Subprocess::FD(STDOUT_FILENO),
+        Subprocess::FD(STDERR_FILENO));
+
+    if (healthProcess.isError()) {
+      cerr << "Unable to launch health process: " << healthProcess.error();
+    } else {
+      healthPid = healthProcess.get().pid();
+
+      cout << "Health check process launched at pid: "
+            << stringify(healthPid) << endl;
+    }
+  }
+}
 
 
 class CommandExecutor: public Executor

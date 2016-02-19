@@ -20,6 +20,20 @@ set(MESOS_EXECUTOR_SRC
   executor.cpp
   )
 
+if (WIN32)
+  set(MESOS_EXECUTOR_SRC
+    ${MESOS_EXECUTOR_SRC}
+    windows.cpp
+    )
+endif (WIN32)
+
+if (NOT WIN32)
+  set(MESOS_EXECUTOR_SRC
+    ${MESOS_EXECUTOR_SRC}
+    posix.cpp
+    )
+endif (NOT WIN32)
+
 # MESOS CONTAINERIZER SOURCE.
 #############################
 set(MESOS_FETCHER_SRC
